@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
 import { useEffect } from 'react'
+import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format, addDays, parseISO } from 'date-fns'
 import { Calendar, Clock, Users, Mail, Phone, MessageSquare, CheckCircle } from 'lucide-react'
@@ -36,13 +36,23 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     }
   })
 
-  // Fetch closures data (not just dates)
+  // Fetch closures data (not just dates) with cache busting
   useEffect(() => {
     const fetchClosures = async () => {
       try {
         console.log('Fetching closures for reservation form...')
         
-        const response = await fetch('/api/closures')
+        // Add cache-busting parameters to force fresh data
+        const timestamp = new Date().getTime()
+        const response = await fetch(`/api/closures?t=${timestamp}&r=${Math.random()}`, {
+          method: 'GET',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        })
+        
         console.log('Closures API response status:', response.status)
         
         if (response.ok) {
@@ -54,27 +64,32 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           
           setClosures(closuresData)
         } else {
-          console.error('API failed, trying direct Supabase...')
-          
-          const { reservationService } = await import('@/lib/supabase')
-          const closuresData = await reservationService.getRestaurantClosures()
-          console.log('Direct Supabase closures:', closuresData)
-          
-          setClosures(closuresData)
+          console.error('API failed with status:', response.status)
+          throw new Error(`API returned ${response.status}`)
         }
       } catch (error) {
         console.error('Error fetching closures:', error)
         
+        // Fallback to direct Supabase with no caching
         try {
           const { reservationService } = await import('@/lib/supabase')
           const closuresData = await reservationService.getRestaurantClosures()
+          console.log('Fallback Supabase closures:', closuresData)
           setClosures(closuresData)
         } catch (supabaseError) {
           console.error('Supabase fallback also failed:', supabaseError)
         }
       }
     }
+    
+    // Fetch immediately
     fetchClosures()
+    
+    // Set up periodic refresh every 30 seconds to keep data fresh
+    const refreshInterval = setInterval(fetchClosures, 30000)
+    
+    // Cleanup interval on unmount
+    return () => clearInterval(refreshInterval)
   }, [])
 
   const selectedDate = watch('reservation_date')

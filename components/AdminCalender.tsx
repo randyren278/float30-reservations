@@ -61,11 +61,21 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     }
   }
 
-  // Fetch closures from API
+  // Fetch closures from API with cache busting
   const fetchClosures = async () => {
     try {
       console.log('Fetching closures from API...')
-      const response = await fetch('/api/closures')
+      
+      // Add cache-busting parameters
+      const timestamp = new Date().getTime()
+      const response = await fetch(`/api/closures?t=${timestamp}&r=${Math.random()}`, {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      })
       
       console.log('Closures API response status:', response.status)
       
@@ -89,10 +99,23 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     }
   }
 
-  // Fetch data on component mount
+  // Fetch data on component mount with auto-refresh
   useEffect(() => {
-    fetchReservations()
-    fetchClosures()
+    const fetchAllData = async () => {
+      await Promise.all([
+        fetchReservations(),
+        fetchClosures()
+      ])
+    }
+    
+    // Fetch immediately
+    fetchAllData()
+    
+    // Set up periodic refresh every 30 seconds for real-time updates
+    const refreshInterval = setInterval(fetchAllData, 30000)
+    
+    // Cleanup interval on unmount
+    return () => clearInterval(refreshInterval)
   }, [])
 
   // Generate time slots based on day of week

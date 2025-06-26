@@ -22,10 +22,19 @@ export async function GET(request: NextRequest) {
 
     console.log('Returning closures to client:', closures)
 
-    return NextResponse.json({
+    // Set cache headers to prevent caching and ensure fresh data
+    const response = NextResponse.json({
       success: true,
       closures: closures || []
     })
+
+    // Prevent all caching to ensure instant updates
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+    response.headers.set('Pragma', 'no-cache')
+    response.headers.set('Expires', '0')
+    response.headers.set('Last-Modified', new Date().toUTCString())
+
+    return response
 
   } catch (error) {
     console.error('Public closures fetch error:', error)
