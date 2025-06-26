@@ -76,9 +76,6 @@ export default function RootLayout({
         <Analytics />
         {children}
       </body>
-      <body className={`${inter.className} h-full antialiased`}>
-        {children}
-      </body>
     </html>
   )
 }
