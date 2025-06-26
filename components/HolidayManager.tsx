@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { format, parseISO, addDays } from 'date-fns'
-import { Calendar, Plus, Trash2, Clock, AlertTriangle } from 'lucide-react'
+import { Calendar, Plus, Trash2, Clock, AlertTriangle, Users, Mail, Phone } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 interface RestaurantClosure {
@@ -17,8 +17,164 @@ interface RestaurantClosure {
   updated_at: string
 }
 
+interface ConflictingReservation {
+  id: string
+  name: string
+  email: string
+  reservation_time: string
+  party_size: number
+  special_requests?: string
+}
+
 interface HolidayManagerProps {
   onClosureUpdate?: () => void
+}
+
+// Confirmation Modal Component
+interface ConfirmationModalProps {
+  isOpen: boolean
+  onClose: () => void
+  onConfirm: () => void
+  conflictingReservations: ConflictingReservation[]
+  closureDetails: {
+    closure_name: string
+    closure_date: string
+    all_day: boolean
+    start_time?: string
+    end_time?: string
+  }
+}
+
+function ConfirmationModal({ 
+  isOpen, 
+  onClose, 
+  onConfirm, 
+  conflictingReservations, 
+  closureDetails 
+}: ConfirmationModalProps) {
+  if (!isOpen) return null
+
+  const formatTime = (time: string) => {
+    try {
+      return format(parseISO(`2000-01-01T${time}`), 'h:mm a')
+    } catch {
+      return time
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-orange-50">
+          <div className="flex items-center">
+            <AlertTriangle className="w-6 h-6 text-orange-600 mr-3" />
+            <h2 className="text-xl font-bold text-gray-900">Reservation Conflicts Detected</h2>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-6">
+          {/* Closure Details */}
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <h3 className="font-semibold text-red-900 mb-2">Proposed Closure</h3>
+            <div className="text-red-800">
+              <div><strong>{closureDetails.closure_name}</strong></div>
+              <div>{format(parseISO(closureDetails.closure_date), 'EEEE, MMMM do, yyyy')}</div>
+              {!closureDetails.all_day && closureDetails.start_time && closureDetails.end_time && (
+                <div>
+                  {formatTime(closureDetails.start_time)} - {formatTime(closureDetails.end_time)}
+                </div>
+              )}
+              {closureDetails.all_day && <div>All Day Closure</div>}
+            </div>
+          </div>
+
+          {/* Warning Message */}
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <div className="flex items-start">
+              <AlertTriangle className="w-5 h-5 text-yellow-600 mr-3 mt-0.5" />
+              <div className="text-yellow-800">
+                <p className="font-medium">
+                  Creating this closure will automatically cancel {conflictingReservations.length} existing reservation{conflictingReservations.length !== 1 ? 's' : ''}.
+                </p>
+                <p className="mt-1 text-sm">
+                  Affected customers will receive automatic cancellation emails. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Conflicting Reservations List */}
+          <div>
+            <h3 className="font-semibold text-gray-900 mb-3">
+              Reservations that will be cancelled ({conflictingReservations.length})
+            </h3>
+            <div className="max-h-60 overflow-y-auto space-y-3">
+              {conflictingReservations.map((reservation) => (
+                <div key={reservation.id} className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-center">
+                        <Users className="w-4 h-4 text-gray-400 mr-2" />
+                        <span className="font-medium">{reservation.name}</span>
+                        <span className="ml-2 text-sm text-gray-600">
+                          ({reservation.party_size} {reservation.party_size === 1 ? 'person' : 'people'})
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center text-sm text-gray-600">
+                        <Clock className="w-3 h-3 mr-2" />
+                        <span>{formatTime(reservation.reservation_time)}</span>
+                      </div>
+                      
+                      <div className="flex items-center text-sm text-gray-600">
+                        <Mail className="w-3 h-3 mr-2" />
+                        <span>{reservation.email}</span>
+                      </div>
+                      
+                      {reservation.special_requests && (
+                        <div className="text-sm text-orange-700 bg-orange-100 p-2 rounded">
+                          <strong>Special Requests:</strong> {reservation.special_requests}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">
+                      ID: {reservation.id.substring(0, 8)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="p-6 border-t border-gray-200 bg-gray-50">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-gray-600">
+              <strong>Confirmation Required:</strong> This will cancel all listed reservations and send cancellation emails.
+            </div>
+            <div className="flex space-x-3">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onConfirm}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Confirm & Cancel Reservations
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // Helper function to broadcast closure events to other components
@@ -48,6 +204,11 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
     start_time: '',
     end_time: ''
   })
+
+  // Confirmation modal state
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [conflictingReservations, setConflictingReservations] = useState<ConflictingReservation[]>([])
+  const [pendingClosureData, setPendingClosureData] = useState<any>(null)
 
   // Fetch closures with cache busting
   const fetchClosures = async () => {
@@ -87,6 +248,72 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
     fetchClosures()
   }, [])
 
+  // Create closure with conflict detection
+  const createClosure = async (closureData: any, forceCancel: boolean = false) => {
+    try {
+      console.log('➕ Creating new closure:', closureData)
+      
+      const response = await fetch('/api/admin/closures', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`
+        },
+        body: JSON.stringify({
+          ...closureData,
+          force_cancel_reservations: forceCancel
+        })
+      })
+
+      const result = await response.json()
+
+      if (response.status === 409 && result.requires_confirmation) {
+        // Conflict detected - show confirmation modal
+        console.log('⚠️ Reservation conflicts detected:', result.conflicting_reservations.length)
+        setConflictingReservations(result.conflicting_reservations)
+        setPendingClosureData(closureData)
+        setShowConfirmModal(true)
+        return
+      }
+
+      if (response.ok) {
+        console.log('✅ Closure created successfully:', result)
+        
+        // Show success message with cancellation info if applicable
+        if (result.cancelled_reservations && result.cancelled_reservations.length > 0) {
+          toast.success(
+            `Closure created successfully. ${result.cancelled_reservations.length} reservation${result.cancelled_reservations.length !== 1 ? 's' : ''} cancelled and customer${result.cancelled_reservations.length !== 1 ? 's' : ''} notified.`,
+            { duration: 5000 }
+          )
+        } else {
+          toast.success('Closure added successfully')
+        }
+        
+        // Refresh local data
+        await fetchClosures()
+        
+        // Broadcast the event to other components
+        broadcastClosureEvent('created', result.closure)
+        
+        // Reset form
+        setShowAddForm(false)
+        resetForm()
+        
+        // Call the callback if provided
+        if (onClosureUpdate) {
+          console.log('📞 Calling onClosureUpdate callback')
+          onClosureUpdate()
+        }
+      } else {
+        console.error('❌ Failed to create closure:', result)
+        toast.error(result.message || 'Failed to add closure')
+      }
+    } catch (error) {
+      console.error('❌ Error adding closure:', error)
+      toast.error('Error adding closure')
+    }
+  }
+
   // Add new closure
   const handleAddClosure = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -114,55 +341,35 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
       return
     }
 
-    try {
-      console.log('➕ Creating new closure:', submitData)
-      
-      const response = await fetch('/api/admin/closures', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`
-        },
-        body: JSON.stringify(submitData)
-      })
+    await createClosure(submitData, false)
+  }
 
-      if (response.ok) {
-        const result = await response.json()
-        console.log('✅ Closure created successfully:', result)
-        
-        // Refresh local data
-        await fetchClosures()
-        
-        // Broadcast the event to other components
-        broadcastClosureEvent('created', result.closure)
-        
-        // Reset form
-        setShowAddForm(false)
-        setFormData({
-          closure_date: '',
-          closure_name: '',
-          closure_reason: '',
-          all_day: true,
-          start_time: '',
-          end_time: ''
-        })
-        
-        toast.success('Closure added successfully')
-        
-        // Call the callback if provided
-        if (onClosureUpdate) {
-          console.log('📞 Calling onClosureUpdate callback')
-          onClosureUpdate()
-        }
-      } else {
-        const error = await response.json()
-        console.error('❌ Failed to create closure:', error)
-        toast.error(error.message || 'Failed to add closure')
-      }
-    } catch (error) {
-      console.error('❌ Error adding closure:', error)
-      toast.error('Error adding closure')
+  // Handle confirmation modal
+  const handleConfirmCreation = async () => {
+    if (pendingClosureData) {
+      setShowConfirmModal(false)
+      await createClosure(pendingClosureData, true) // Force cancel reservations
+      setPendingClosureData(null)
+      setConflictingReservations([])
     }
+  }
+
+  const handleCancelCreation = () => {
+    setShowConfirmModal(false)
+    setPendingClosureData(null)
+    setConflictingReservations([])
+    toast('Closure creation cancelled')
+  }
+
+  const resetForm = () => {
+    setFormData({
+      closure_date: '',
+      closure_name: '',
+      closure_reason: '',
+      all_day: true,
+      start_time: '',
+      end_time: ''
+    })
   }
 
   // Delete closure
@@ -222,6 +429,15 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
 
   return (
     <div className="bg-white rounded-lg shadow-lg">
+      {/* Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={handleCancelCreation}
+        onConfirm={handleConfirmCreation}
+        conflictingReservations={conflictingReservations}
+        closureDetails={pendingClosureData || {}}
+      />
+
       {/* Header */}
       <div className="p-6 border-b border-gray-200">
         <div className="flex items-center justify-between">
@@ -329,6 +545,17 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
               </div>
             )}
 
+            {/* Warning message for potential conflicts */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <div className="flex items-start">
+                <AlertTriangle className="w-4 h-4 text-yellow-600 mr-2 mt-0.5" />
+                <div className="text-sm text-yellow-800">
+                  <strong>Note:</strong> If there are existing reservations on this date/time, 
+                  you will be asked to confirm their cancellation before the closure is created.
+                </div>
+              </div>
+            </div>
+
             <div className="flex space-x-3">
               <button
                 type="submit"
@@ -338,7 +565,10 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
               </button>
               <button
                 type="button"
-                onClick={() => setShowAddForm(false)}
+                onClick={() => {
+                  setShowAddForm(false)
+                  resetForm()
+                }}
                 className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
               >
                 Cancel
