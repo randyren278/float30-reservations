@@ -64,11 +64,25 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   // Fetch closures from API
   const fetchClosures = async () => {
     try {
+      console.log('Fetching closures from API...')
       const response = await fetch('/api/closures')
+      
+      console.log('Closures API response status:', response.status)
       
       if (response.ok) {
         const data = await response.json()
-        setClosures(data.closures || [])
+        console.log('Closures API data:', data)
+        console.log('Closures array:', data.closures)
+        console.log('Number of closures:', data.closures?.length || 0)
+        
+        const closuresData = data.closures || []
+        setClosures(closuresData)
+        
+        if (closuresData.length > 0) {
+          console.log('Sample closure:', closuresData[0])
+        }
+      } else {
+        console.error('Failed to fetch closures, status:', response.status)
       }
     } catch (error) {
       console.error('Calendar: Error fetching closures:', error)
@@ -159,7 +173,17 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   // Check if a day is closed
   const getDayClosure = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd')
-    return closures.find(c => c.closure_date === dateStr)
+    console.log('Checking closure for date:', dateStr)
+    console.log('Available closures:', closures.map(c => ({ date: c.closure_date, name: c.closure_name })))
+    
+    const closure = closures.find(c => c.closure_date === dateStr)
+    if (closure) {
+      console.log('Found closure:', closure)
+    } else {
+      console.log('No closure found for', dateStr)
+    }
+    
+    return closure
   }
 
   // Check if a specific time slot is during a closure
@@ -167,13 +191,27 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     const closure = getDayClosure(date)
     if (!closure) return false
     
+    console.log('Checking time slot closure:', { 
+      date: format(date, 'yyyy-MM-dd'), 
+      timeSlot, 
+      closure: closure.closure_name,
+      allDay: closure.all_day,
+      startTime: closure.start_time,
+      endTime: closure.end_time
+    })
+    
     // If it's an all-day closure, the entire day is closed
-    if (closure.all_day) return true
+    if (closure.all_day) {
+      console.log('All-day closure detected')
+      return true
+    }
     
     // For partial closures, check if time falls within closure period
     if (closure.start_time && closure.end_time) {
       const slotTime = timeSlot
-      return slotTime >= closure.start_time && slotTime <= closure.end_time
+      const isClosed = slotTime >= closure.start_time && slotTime <= closure.end_time
+      console.log('Partial closure check:', { slotTime, startTime: closure.start_time, endTime: closure.end_time, isClosed })
+      return isClosed
     }
     
     return false
@@ -231,6 +269,20 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
         </div>
       )}
 
+      {/* Debug info for closures */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="p-4 bg-yellow-50 border border-yellow-200">
+          <div className="text-sm text-yellow-800">
+            <strong>Debug:</strong> {closures.length} closures loaded
+            {closures.length > 0 && (
+              <div className="mt-1">
+                Closure dates: {closures.map(c => c.closure_date).join(', ')}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Calendar Header */}
       <div className="p-6 border-b border-gray-200">
         <div className="flex items-center justify-between mb-4">
@@ -278,7 +330,18 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
           </p>
         </div>
       </div>
-      
+
+      {/* Debug Info (Development Only) */}
+      {process.env.NODE_ENV === 'development' && reservations.length > 0 && (
+        <div className="p-4 bg-gray-50 border-t border-gray-200">
+          <h4 className="font-medium text-gray-800 mb-2">Debug Info:</h4>
+          <div className="text-sm text-gray-700 space-y-1">
+            <div>Reservations loaded: {reservations.length}</div>
+            <div>Sample reservation: {JSON.stringify(reservations[0], null, 2)}</div>
+          </div>
+        </div>
+      )}
+
       {/* Calendar Grid */}
       <div className="overflow-x-auto">
         <div className="min-w-full">

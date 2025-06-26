@@ -130,6 +130,31 @@ export const reservationService = {
     return settings
   },
 
+  // Get restaurant closures (public access)
+  async getRestaurantClosures() {
+    try {
+      console.log('Fetching closures via supabase service...')
+      
+      const { data, error } = await supabase
+        .from('restaurant_closures')
+        .select('closure_date, closure_name, all_day, start_time, end_time')
+        .gte('closure_date', new Date().toISOString().split('T')[0])
+        .order('closure_date', { ascending: true })
+      
+      console.log('Supabase service closures result:', { error, count: data?.length || 0 })
+      
+      if (error) {
+        console.error('Supabase service error:', error)
+        throw error
+      }
+      
+      return data || []
+    } catch (error) {
+      console.error('getRestaurantClosures error:', error)
+      throw error
+    }
+  },
+
   // Get available time slots for a date
   async getAvailableSlots(date: string) {
     const { data, error } = await supabase

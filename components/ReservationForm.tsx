@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { useEffect } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format, addDays, parseISO } from 'date-fns'
 import { Calendar, Clock, Users, Mail, Phone, MessageSquare, CheckCircle } from 'lucide-react'
@@ -18,7 +19,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
   const [reservationDetails, setReservationDetails] = useState<any>(null)
-  const [closedDates, setClosedDates] = useState<string[]>([])
+  const [closures, setClosures] = useState<any[]>([]) // Store full closure objects instead of just dates
 
   const {
     register,
@@ -35,37 +36,68 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     }
   })
 
-  // Fetch closed dates
+  // Fetch closures data (not just dates)
   useEffect(() => {
-    const fetchClosedDates = async () => {
+    const fetchClosures = async () => {
       try {
+        console.log('Fetching closures for reservation form...')
+        
         const response = await fetch('/api/closures')
+        console.log('Closures API response status:', response.status)
+        
         if (response.ok) {
           const data = await response.json()
-          const dates = data.closures?.map((c: any) => c.closure_date) || []
-          setClosedDates(dates)
+          console.log('Closures API data:', data)
+          
+          const closuresData = data.closures || []
+          console.log('Closures array from API:', closuresData)
+          
+          setClosures(closuresData)
+        } else {
+          console.error('API failed, trying direct Supabase...')
+          
+          const { reservationService } = await import('@/lib/supabase')
+          const closuresData = await reservationService.getRestaurantClosures()
+          console.log('Direct Supabase closures:', closuresData)
+          
+          setClosures(closuresData)
         }
       } catch (error) {
-        console.error('Error fetching closed dates:', error)
+        console.error('Error fetching closures:', error)
+        
+        try {
+          const { reservationService } = await import('@/lib/supabase')
+          const closuresData = await reservationService.getRestaurantClosures()
+          setClosures(closuresData)
+        } catch (supabaseError) {
+          console.error('Supabase fallback also failed:', supabaseError)
+        }
       }
     }
-    fetchClosedDates()
+    fetchClosures()
   }, [])
 
   const selectedDate = watch('reservation_date')
   const selectedTime = watch('reservation_time')
 
-  // Generate available dates (next 30 days, open all days, excluding closures)
+  // Generate available dates (only exclude full-day closures)
   const getAvailableDates = () => {
     const dates = []
     const today = new Date()
+    
+    console.log('Generating available dates, closures:', closures)
     
     for (let i = 0; i < 30; i++) {
       const date = addDays(today, i)
       const dateString = format(date, 'yyyy-MM-dd')
       
-      // Skip if restaurant is closed on this date
-      if (!closedDates.includes(dateString)) {
+      // Check if this date has an all-day closure
+      const allDayClosure = closures.find(c => c.closure_date === dateString && c.all_day === true)
+      
+      console.log('Checking date:', dateString, 'All-day closure:', !!allDayClosure)
+      
+      // Only skip dates with all-day closures
+      if (!allDayClosure) {
         dates.push({
           value: dateString,
           label: format(date, 'EEEE, MMMM do'),
@@ -74,7 +106,28 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       }
     }
     
+    console.log('Available dates generated:', dates.length)
     return dates
+  }
+
+  // Check if a specific time slot is during a partial closure
+  const isTimeSlotBlocked = (date: string, time: string) => {
+    const dayClosures = closures.filter(c => c.closure_date === date)
+    
+    for (const closure of dayClosures) {
+      // Skip all-day closures (already handled in date filtering)
+      if (closure.all_day) continue
+      
+      // Check if time falls within partial closure
+      if (closure.start_time && closure.end_time) {
+        if (time >= closure.start_time && time <= closure.end_time) {
+          console.log('Time slot blocked by partial closure:', { date, time, closure: closure.closure_name })
+          return true
+        }
+      }
+    }
+    
+    return false
   }
 
   // Generate available time slots based on day of week
@@ -112,12 +165,16 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     for (let hour = startHour; hour < endHour; hour++) {
       for (let minute = 0; minute < 60; minute += 30) { // Changed from 15 to 30
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
-        const displayTime = format(parseISO(`2000-01-01T${timeString}`), 'h:mm a')
         
-        slots.push({
-          value: timeString,
-          label: displayTime
-        })
+        // Check if this time slot is blocked by a partial closure
+        if (!selectedDate || !isTimeSlotBlocked(selectedDate, timeString)) {
+          const displayTime = format(parseISO(`2000-01-01T${timeString}`), 'h:mm a')
+          
+          slots.push({
+            value: timeString,
+            label: displayTime
+          })
+        }
       }
     }
     
@@ -231,6 +288,22 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
         <h2 className="text-2xl font-bold text-gray-900 mb-2">Make a Reservation</h2>
         <p className="text-gray-600">Float 30 Restaurant</p>
       </div>
+
+      {/* Debug info for development */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="mb-4 p-3 bg-gray-100 rounded text-sm">
+          <strong>Debug:</strong> {closures.length} closures loaded
+          {closures.length > 0 && (
+            <div>
+              {closures.map((c, i) => (
+                <div key={i}>
+                  {c.closure_date} - {c.closure_name} ({c.all_day ? 'All day' : `${c.start_time}-${c.end_time}`})
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         {/* Date Selection */}
