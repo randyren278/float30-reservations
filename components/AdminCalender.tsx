@@ -55,14 +55,51 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     fetchReservations()
   }, [])
 
-  // Generate time slots from 5:00 PM to 10:00 PM in 15-minute intervals
+  // Generate time slots based on day of week
+  const getTimeSlotsForDay = (dayOfWeek: number) => {
+    let startHour, endHour
+    
+    switch (dayOfWeek) {
+      case 1: // Monday
+      case 2: // Tuesday
+        startHour = 10
+        endHour = 16
+        break
+      case 3: // Wednesday
+      case 4: // Thursday  
+      case 0: // Sunday
+        startHour = 10
+        endHour = 20
+        break
+      case 5: // Friday
+      case 6: // Saturday
+        startHour = 10
+        endHour = 21
+        break
+      default:
+        startHour = 10
+        endHour = 20
+    }
+    
+    const slots = []
+    for (let hour = startHour; hour < endHour; hour++) {
+      for (let minute = 0; minute < 60; minute += 30) { // Changed from 15 to 30
+        const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+        slots.push(timeString)
+      }
+    }
+    
+    return slots
+  }
+
+  // Generate master time slots (10 AM to 9 PM for calendar display)
   useEffect(() => {
     const slots = []
-    const startHour = 17 // 5 PM
-    const endHour = 22   // 10 PM
+    const startHour = 10 // 10 AM
+    const endHour = 21   // 9 PM
     
     for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += 15) {
+      for (let minute = 0; minute < 60; minute += 30) { // Changed from 15 to 30
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
         slots.push(timeString)
       }
@@ -76,8 +113,8 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   const weekEnd = endOfWeek(currentWeek, { weekStartsOn: 1 })
   const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd })
 
-  // Filter out Mondays (restaurant closed)
-  const openDays = weekDays.filter(day => day.getDay() !== 1)
+  // Filter out no days (restaurant is open 7 days a week)
+  const openDays = weekDays
 
   // Navigation functions
   const goToPreviousWeek = () => setCurrentWeek(subWeeks(currentWeek, 1))
@@ -186,22 +223,11 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
         </div>
       </div>
 
-      {/* Debug Info (Development Only) */}
-      {process.env.NODE_ENV === 'development' && reservations.length > 0 && (
-        <div className="p-4 bg-gray-50 border-t border-gray-200">
-          <h4 className="font-medium text-gray-800 mb-2">Debug Info:</h4>
-          <div className="text-sm text-gray-700 space-y-1">
-            <div>Reservations loaded: {reservations.length}</div>
-            <div>Sample reservation: {JSON.stringify(reservations[0], null, 2)}</div>
-          </div>
-        </div>
-      )}
-
       {/* Calendar Grid */}
       <div className="overflow-x-auto">
         <div className="min-w-full">
           {/* Day Headers */}
-          <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
+          <div className="grid grid-cols-8 bg-gray-50 border-b border-gray-200">
             <div className="p-3 text-sm font-medium text-gray-600 border-r border-gray-200">
               Time
             </div>
@@ -228,7 +254,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
             {timeSlots.map((timeSlot) => (
               <div
                 key={timeSlot}
-                className="grid grid-cols-7 border-b border-gray-100 hover:bg-gray-50"
+                className="grid grid-cols-8 border-b border-gray-100 hover:bg-gray-50"
               >
                 {/* Time Column */}
                 <div className="p-3 text-sm font-medium text-gray-600 border-r border-gray-200 bg-gray-50">
@@ -240,7 +266,10 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
                 
                 {/* Day Columns */}
                 {openDays.map((day) => {
-                  const dayReservations = getReservationsForSlot(day, timeSlot)
+                  const dayOfWeek = day.getDay()
+                  const validSlotsForDay = getTimeSlotsForDay(dayOfWeek)
+                  const isValidSlot = validSlotsForDay.includes(timeSlot)
+                  const dayReservations = isValidSlot ? getReservationsForSlot(day, timeSlot) : []
                   const isToday = isSameDay(day, new Date())
                   
                   return (
@@ -248,55 +277,63 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
                       key={`${day.toISOString()}-${timeSlot}`}
                       className={`p-1 border-r border-gray-200 last:border-r-0 min-h-[60px] ${
                         isToday ? 'bg-blue-50' : ''
-                      }`}
+                      } ${!isValidSlot ? 'bg-gray-100' : ''}`}
                     >
-                      {dayReservations.map((reservation) => (
-                        <div
-                          key={reservation.id}
-                          onClick={() => onReservationClick?.(reservation)}
-                          className={`
-                            p-2 mb-1 rounded-md border cursor-pointer transition-all hover:shadow-sm
-                            ${getStatusColor(reservation.status)}
-                          `}
-                        >
-                          <div className="text-xs font-medium truncate">
-                            {reservation.name}
-                          </div>
-                          <div className="flex items-center text-xs text-gray-600 mt-1">
-                            <Users className="w-3 h-3 mr-1" />
-                            <span>{reservation.party_size}</span>
-                            {reservation.special_requests && (
-                              <span className="ml-1 text-orange-600">⚠</span>
-                            )}
-                          </div>
+                      {!isValidSlot ? (
+                        <div className="h-full flex items-center justify-center text-gray-400">
+                          <div className="text-xs">Closed</div>
+                        </div>
+                      ) : (
+                        <>
+                          {dayReservations.map((reservation) => (
+                            <div
+                              key={reservation.id}
+                              onClick={() => onReservationClick?.(reservation)}
+                              className={`
+                                p-2 mb-1 rounded-md border cursor-pointer transition-all hover:shadow-sm
+                                ${getStatusColor(reservation.status)}
+                              `}
+                            >
+                              <div className="text-xs font-medium truncate">
+                                {reservation.name}
+                              </div>
+                              <div className="flex items-center text-xs text-gray-600 mt-1">
+                                <Users className="w-3 h-3 mr-1" />
+                                <span>{reservation.party_size}</span>
+                                {reservation.special_requests && (
+                                  <span className="ml-1 text-orange-600">⚠</span>
+                                )}
+                              </div>
+                              
+                              {/* Quick Action Buttons */}
+                              {reservation.status === 'confirmed' && (
+                                <div className="flex space-x-1 mt-1">
+                                  <button
+                                    onClick={(e) => handleQuickStatusUpdate(e, reservation.id, 'completed')}
+                                    className="text-xs px-1 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                    title="Mark Complete"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    onClick={(e) => handleQuickStatusUpdate(e, reservation.id, 'no_show')}
+                                    className="text-xs px-1 py-0.5 bg-orange-600 text-white rounded hover:bg-orange-700"
+                                    title="Mark No Show"
+                                  >
+                                    ✗
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
                           
-                          {/* Quick Action Buttons */}
-                          {reservation.status === 'confirmed' && (
-                            <div className="flex space-x-1 mt-1">
-                              <button
-                                onClick={(e) => handleQuickStatusUpdate(e, reservation.id, 'completed')}
-                                className="text-xs px-1 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700"
-                                title="Mark Complete"
-                              >
-                                ✓
-                              </button>
-                              <button
-                                onClick={(e) => handleQuickStatusUpdate(e, reservation.id, 'no_show')}
-                                className="text-xs px-1 py-0.5 bg-orange-600 text-white rounded hover:bg-orange-700"
-                                title="Mark No Show"
-                              >
-                                ✗
-                              </button>
+                          {/* Empty slot indicator */}
+                          {dayReservations.length === 0 && (
+                            <div className="h-full flex items-center justify-center text-gray-300">
+                              <div className="text-xs">—</div>
                             </div>
                           )}
-                        </div>
-                      ))}
-                      
-                      {/* Empty slot indicator */}
-                      {dayReservations.length === 0 && (
-                        <div className="h-full flex items-center justify-center text-gray-300">
-                          <div className="text-xs">—</div>
-                        </div>
+                        </>
                       )}
                     </div>
                   )

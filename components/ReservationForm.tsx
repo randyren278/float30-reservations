@@ -37,36 +37,59 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
   const selectedDate = watch('reservation_date')
   const selectedTime = watch('reservation_time')
 
-  // Generate available dates (next 30 days, excluding Mondays)
+  // Generate available dates (next 30 days, open all days)
   const getAvailableDates = () => {
     const dates = []
     const today = new Date()
     
     for (let i = 0; i < 30; i++) {
       const date = addDays(today, i)
-      const dayOfWeek = date.getDay()
       
-      // Skip Mondays (1) - restaurant closed
-      if (dayOfWeek !== 1) {
-        dates.push({
-          value: format(date, 'yyyy-MM-dd'),
-          label: format(date, 'EEEE, MMMM do'),
-          isToday: i === 0
-        })
-      }
+      // All days are now open
+      dates.push({
+        value: format(date, 'yyyy-MM-dd'),
+        label: format(date, 'EEEE, MMMM do'),
+        isToday: i === 0
+      })
     }
     
     return dates
   }
 
-  // Generate available time slots
+  // Generate available time slots based on day of week
   const getAvailableTimeSlots = () => {
-    const slots = []
-    const startHour = 17 // 5 PM
-    const endHour = 22   // 10 PM
+    if (!selectedDate) return []
     
+    const date = parseISO(selectedDate)
+    const dayOfWeek = date.getDay() // 0 = Sunday, 1 = Monday, etc.
+    
+    let startHour, endHour
+    
+    switch (dayOfWeek) {
+      case 1: // Monday
+      case 2: // Tuesday
+        startHour = 10
+        endHour = 16
+        break
+      case 3: // Wednesday  
+      case 4: // Thursday
+      case 0: // Sunday
+        startHour = 10
+        endHour = 20
+        break
+      case 5: // Friday
+      case 6: // Saturday
+        startHour = 10
+        endHour = 21
+        break
+      default:
+        startHour = 10
+        endHour = 20
+    }
+    
+    const slots = []
     for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += 15) {
+      for (let minute = 0; minute < 60; minute += 30) { // Changed from 15 to 30
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
         const displayTime = format(parseISO(`2000-01-01T${timeString}`), 'h:mm a')
         
@@ -341,7 +364,8 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           <ul className="text-sm text-gray-600 space-y-1">
             <li>• Please arrive on time - tables may be released after 15 minutes</li>
             <li>• Reservations can be made up to 30 days in advance</li>
-            <li>• We're closed on Mondays</li>
+            <li>• We're open 7 days a week with varying hours</li>
+            <li>• Mon-Tue: 10am-4pm | Wed-Thu & Sun: 10am-8pm | Fri-Sat: 10am-9pm</li>
             <li>• For parties larger than 10, please call us directly</li>
             <li>• Confirmation email will be sent immediately</li>
           </ul>

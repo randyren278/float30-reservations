@@ -40,13 +40,25 @@ CREATE TABLE restaurant_settings (
 -- Insert default restaurant settings
 INSERT INTO restaurant_settings (setting_key, setting_value, description) VALUES
 ('max_tables', '12', 'Maximum number of tables available'),
-('slot_duration', '15', 'Reservation slot duration in minutes'),
+('slot_duration', '30', 'Reservation slot duration in minutes'),
 ('advance_booking_days', '30', 'How many days in advance customers can book'),
-('opening_time', '17:00', 'Restaurant opening time (24h format)'),
-('closing_time', '22:00', 'Restaurant closing time (24h format)'),
+('opening_time_wed', '10:00', 'Wednesday opening time'),
+('closing_time_wed', '20:00', 'Wednesday closing time'),
+('opening_time_thu', '10:00', 'Thursday opening time'),
+('closing_time_thu', '20:00', 'Thursday closing time'),
+('opening_time_fri', '10:00', 'Friday opening time'),
+('closing_time_fri', '21:00', 'Friday closing time'),
+('opening_time_sat', '10:00', 'Saturday opening time'),
+('closing_time_sat', '21:00', 'Saturday closing time'),
+('opening_time_sun', '10:00', 'Sunday opening time'),
+('closing_time_sun', '20:00', 'Sunday closing time'),
+('opening_time_mon', '10:00', 'Monday opening time'),
+('closing_time_mon', '16:00', 'Monday closing time'),
+('opening_time_tue', '10:00', 'Tuesday opening time'),
+('closing_time_tue', '16:00', 'Tuesday closing time'),
 ('max_party_size', '10', 'Maximum party size allowed'),
 ('reservations_per_slot', '3', 'Maximum reservations allowed per time slot'),
-('closed_days', 'monday', 'Days when restaurant is closed (comma-separated)');
+('closed_days', '', 'Days when restaurant is closed (empty = open all days)');
 
 -- Create indexes for better performance
 CREATE INDEX idx_reservations_date_time ON reservations(reservation_date, reservation_time);

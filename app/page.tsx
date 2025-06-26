@@ -60,18 +60,20 @@ export default function ReservationsPage() {
                 <div>
                   <h4 className="font-semibold text-gray-700">Hours</h4>
                   <div className="text-gray-600 text-sm mt-1">
-                    <p>Tuesday - Sunday: 5:00 PM - 10:00 PM</p>
-                    <p className="text-red-600 font-medium">Closed Mondays</p>
+                    <p>Monday - Tuesday: 10:00 AM - 4:00 PM</p>
+                    <p>Wednesday - Thursday: 10:00 AM - 8:00 PM</p>
+                    <p>Friday - Saturday: 10:00 AM - 9:00 PM</p>
+                    <p>Sunday: 10:00 AM - 8:00 PM</p>
                   </div>
                 </div>
 
                 <div>
                   <h4 className="font-semibold text-gray-700">Phone</h4>
                   <a 
-                    href="tel:+1-555-123-4567" 
+                    href="tel:+1-778-300-1378" 
                     className="text-blue-600 hover:text-blue-800 text-sm"
                   >
-                    +1 (555) 123-4567
+                    (778) 300-1378
                   </a>
                 </div>
 
@@ -88,10 +90,22 @@ export default function ReservationsPage() {
                 <div>
                   <h4 className="font-semibold text-gray-700">Address</h4>
                   <p className="text-gray-600 text-sm">
-                    123 Waterfront Drive<br />
-                    Vancouver, BC V6C 1A1<br />
+                    Reed Point Way<br />
+                    Port Moody, BC V3H 3R5<br />
                     Canada
                   </p>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-700">Menu</h4>
+                  <a 
+                    href="https://float30restaurant.com" 
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 text-sm"
+                  >
+                    float30restaurant.com
+                  </a>
                 </div>
               </div>
             </div>
@@ -156,13 +170,13 @@ export default function ReservationsPage() {
               Exceptional dining experiences in the heart of Vancouver
             </p>
             <div className="flex justify-center space-x-6 text-sm">
-              <a href="tel:+1-555-123-4567" className="text-gray-400 hover:text-white">
+              <a href="tel:+1-778-300-1378" className="text-gray-400 hover:text-white">
                 Call Us
               </a>
               <a href="mailto:float30reservations@gmail.com" className="text-gray-400 hover:text-white">
                 Email
               </a>
-              <a href="#" className="text-gray-400 hover:text-white">
+              <a href="https://float30restaurant.com" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white">
                 Main Website
               </a>
               <a href="/admin" className="text-gray-400 hover:text-white">
@@ -171,7 +185,8 @@ export default function ReservationsPage() {
             </div>
             <div className="mt-4 pt-4 border-t border-gray-800">
               <p className="text-gray-500 text-xs">
-                © 2025 Float 30 Restaurant. All rights reserved.
+                © 2025 Float 30 Restaurant. All rights reserved.<br />
+                Reed Point Way, Port Moody, BC | (778) 300-1378
               </p>
             </div>
           </div>
