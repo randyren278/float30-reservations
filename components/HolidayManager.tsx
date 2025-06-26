@@ -21,6 +21,21 @@ interface HolidayManagerProps {
   onClosureUpdate?: () => void
 }
 
+// Helper function to broadcast closure events to other components
+const broadcastClosureEvent = (eventType: 'created' | 'updated' | 'deleted', closureData?: any) => {
+  console.log(`📡 Broadcasting closure event: ${eventType}`, closureData)
+  
+  // Dispatch custom events that other components can listen to
+  window.dispatchEvent(new CustomEvent(`closure${eventType.charAt(0).toUpperCase() + eventType.slice(1)}`, {
+    detail: closureData
+  }))
+  
+  // Also dispatch a generic closureUpdated event
+  window.dispatchEvent(new CustomEvent('closureUpdated', {
+    detail: { type: eventType, data: closureData }
+  }))
+}
+
 export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps) {
   const [closures, setClosures] = useState<RestaurantClosure[]>([])
   const [loading, setLoading] = useState(false)
@@ -34,22 +49,34 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
     end_time: ''
   })
 
-  // Fetch closures
+  // Fetch closures with cache busting
   const fetchClosures = async () => {
     setLoading(true)
     try {
-      const response = await fetch('/api/admin/closures', {
+      console.log('🔄 HolidayManager: Fetching closures...')
+      
+      // Force cache refresh
+      const timestamp = new Date().getTime()
+      const response = await fetch(`/api/admin/closures?t=${timestamp}&r=${Math.random()}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`
-        }
+          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        },
+        cache: 'no-store'
       })
       
       if (response.ok) {
         const data = await response.json()
-        setClosures(data.closures || [])
+        const closuresData = data.closures || []
+        setClosures(closuresData)
+        console.log(`✅ HolidayManager: Loaded ${closuresData.length} closures`)
+      } else {
+        console.error('❌ Failed to fetch closures:', response.status)
+        toast.error('Failed to load closures')
       }
     } catch (error) {
-      console.error('Error fetching closures:', error)
+      console.error('❌ Error fetching closures:', error)
       toast.error('Failed to load closures')
     } finally {
       setLoading(false)
@@ -88,6 +115,8 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
     }
 
     try {
+      console.log('➕ Creating new closure:', submitData)
+      
       const response = await fetch('/api/admin/closures', {
         method: 'POST',
         headers: {
@@ -98,7 +127,16 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
       })
 
       if (response.ok) {
+        const result = await response.json()
+        console.log('✅ Closure created successfully:', result)
+        
+        // Refresh local data
         await fetchClosures()
+        
+        // Broadcast the event to other components
+        broadcastClosureEvent('created', result.closure)
+        
+        // Reset form
         setShowAddForm(false)
         setFormData({
           closure_date: '',
@@ -108,22 +146,36 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
           start_time: '',
           end_time: ''
         })
+        
         toast.success('Closure added successfully')
-        if (onClosureUpdate) onClosureUpdate()
+        
+        // Call the callback if provided
+        if (onClosureUpdate) {
+          console.log('📞 Calling onClosureUpdate callback')
+          onClosureUpdate()
+        }
       } else {
         const error = await response.json()
+        console.error('❌ Failed to create closure:', error)
         toast.error(error.message || 'Failed to add closure')
       }
     } catch (error) {
+      console.error('❌ Error adding closure:', error)
       toast.error('Error adding closure')
     }
   }
 
   // Delete closure
   const handleDeleteClosure = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this closure?')) return
+    const closureToDelete = closures.find(c => c.id === id)
+    
+    if (!confirm(`Are you sure you want to delete the closure "${closureToDelete?.closure_name}"?`)) {
+      return
+    }
 
     try {
+      console.log('🗑️ Deleting closure:', id)
+      
       const response = await fetch(`/api/admin/closures/${id}`, {
         method: 'DELETE',
         headers: {
@@ -132,13 +184,28 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
       })
 
       if (response.ok) {
+        console.log('✅ Closure deleted successfully')
+        
+        // Refresh local data
         await fetchClosures()
+        
+        // Broadcast the event to other components
+        broadcastClosureEvent('deleted', { id, ...closureToDelete })
+        
         toast.success('Closure deleted successfully')
-        if (onClosureUpdate) onClosureUpdate()
+        
+        // Call the callback if provided
+        if (onClosureUpdate) {
+          console.log('📞 Calling onClosureUpdate callback after deletion')
+          onClosureUpdate()
+        }
       } else {
-        toast.error('Failed to delete closure')
+        const errorData = await response.json()
+        console.error('❌ Failed to delete closure:', errorData)
+        toast.error(errorData.message || 'Failed to delete closure')
       }
     } catch (error) {
+      console.error('❌ Error deleting closure:', error)
       toast.error('Error deleting closure')
     }
   }
@@ -288,12 +355,26 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
         </div>
       )}
 
+      {/* Debug info */}
+      {process.env.NODE_ENV === 'development' && !loading && (
+        <div className="p-4 bg-yellow-50 border border-yellow-200">
+          <div className="text-sm text-yellow-800">
+            <strong>🐛 Debug:</strong> HolidayManager has {closures.length} closures loaded
+            {closures.length > 0 && (
+              <div className="mt-1">
+                IDs: {closures.map(c => c.id.substring(0, 8)).join(', ')}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Upcoming Closures */}
       {!loading && upcomingClosures.length > 0 && (
         <div className="p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
             <AlertTriangle className="w-5 h-5 text-amber-500 mr-2" />
-            Upcoming Closures
+            Upcoming Closures ({upcomingClosures.length})
           </h3>
           <div className="space-y-3">
             {upcomingClosures.map((closure) => (
@@ -311,6 +392,9 @@ export default function HolidayManager({ onClosureUpdate }: HolidayManagerProps)
                   {closure.closure_reason && (
                     <div className="text-sm text-gray-500">{closure.closure_reason}</div>
                   )}
+                  <div className="text-xs text-gray-400 mt-1">
+                    ID: {closure.id.substring(0, 8)}...
+                  </div>
                 </div>
                 <button
                   onClick={() => handleDeleteClosure(closure.id)}

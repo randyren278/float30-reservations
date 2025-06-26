@@ -19,7 +19,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
   const [reservationDetails, setReservationDetails] = useState<any>(null)
-  const [closures, setClosures] = useState<any[]>([]) // Store full closure objects instead of just dates
+  const [closures, setClosures] = useState<any[]>([])
 
   const {
     register,
@@ -36,60 +36,77 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     }
   })
 
-  // Fetch closures data (not just dates) with cache busting
-  useEffect(() => {
-    const fetchClosures = async () => {
-      try {
-        console.log('Fetching closures for reservation form...')
+  // Force refresh closures function
+  const forceRefreshClosures = async () => {
+    try {
+      console.log('🔄 ReservationForm: Force refreshing closures...')
+      
+      // Add multiple cache-busting parameters
+      const timestamp = new Date().getTime()
+      const random = Math.random().toString(36).substring(7)
+      const url = `/api/closures?t=${timestamp}&r=${random}&force=true&nocache=1`
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
+          'If-None-Match': '*'
+        },
+        cache: 'no-store'
+      })
+      
+      console.log('ReservationForm closures API response status:', response.status)
+      
+      if (response.ok) {
+        const data = await response.json()
+        console.log('ReservationForm fresh closures data:', data)
         
-        // Add cache-busting parameters to force fresh data
-        const timestamp = new Date().getTime()
-        const response = await fetch(`/api/closures?t=${timestamp}&r=${Math.random()}`, {
-          method: 'GET',
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-          }
-        })
+        const closuresData = data.closures || []
+        console.log(`ReservationForm: Setting ${closuresData.length} closures`)
         
-        console.log('Closures API response status:', response.status)
-        
-        if (response.ok) {
-          const data = await response.json()
-          console.log('Closures API data:', data)
-          
-          const closuresData = data.closures || []
-          console.log('Closures array from API:', closuresData)
-          
-          setClosures(closuresData)
-        } else {
-          console.error('API failed with status:', response.status)
-          throw new Error(`API returned ${response.status}`)
-        }
-      } catch (error) {
-        console.error('Error fetching closures:', error)
-        
-        // Fallback to direct Supabase with no caching
-        try {
-          const { reservationService } = await import('@/lib/supabase')
-          const closuresData = await reservationService.getRestaurantClosures()
-          console.log('Fallback Supabase closures:', closuresData)
-          setClosures(closuresData)
-        } catch (supabaseError) {
-          console.error('Supabase fallback also failed:', supabaseError)
-        }
+        setClosures(closuresData)
+        return closuresData
+      } else {
+        console.error('ReservationForm: API failed with status:', response.status)
+        throw new Error(`API returned ${response.status}`)
       }
+    } catch (error) {
+      console.error('ReservationForm: Error fetching closures:', error)
+      return []
     }
-    
+  }
+
+  // Fetch closures data with cache busting
+  useEffect(() => {
     // Fetch immediately
-    fetchClosures()
+    forceRefreshClosures()
     
     // Set up periodic refresh every 30 seconds to keep data fresh
-    const refreshInterval = setInterval(fetchClosures, 30000)
+    const refreshInterval = setInterval(() => {
+      console.log('⏰ ReservationForm: Periodic closure refresh')
+      forceRefreshClosures()
+    }, 30000)
     
-    // Cleanup interval on unmount
-    return () => clearInterval(refreshInterval)
+    // Listen for closure update events from admin components
+    const handleClosureUpdate = () => {
+      console.log('📡 ReservationForm: Received closure update event')
+      forceRefreshClosures()
+    }
+
+    window.addEventListener('closureUpdated', handleClosureUpdate)
+    window.addEventListener('closureDeleted', handleClosureUpdate)
+    window.addEventListener('closureCreated', handleClosureUpdate)
+    
+    // Cleanup on unmount
+    return () => {
+      clearInterval(refreshInterval)
+      window.removeEventListener('closureUpdated', handleClosureUpdate)
+      window.removeEventListener('closureDeleted', handleClosureUpdate)
+      window.removeEventListener('closureCreated', handleClosureUpdate)
+    }
   }, [])
 
   const selectedDate = watch('reservation_date')
@@ -100,16 +117,20 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     const dates = []
     const today = new Date()
     
-    console.log('Generating available dates, closures:', closures)
+    console.log('ReservationForm: Generating available dates, closures:', closures.length)
     
     for (let i = 0; i < 30; i++) {
       const date = addDays(today, i)
       const dateString = format(date, 'yyyy-MM-dd')
       
       // Check if this date has an all-day closure
-      const allDayClosure = closures.find(c => c.closure_date === dateString && c.all_day === true)
-      
-      console.log('Checking date:', dateString, 'All-day closure:', !!allDayClosure)
+      const allDayClosure = closures.find(c => {
+        const matches = c.closure_date === dateString && c.all_day === true
+        if (matches) {
+          console.log(`ReservationForm: Found all-day closure for ${dateString}:`, c.closure_name)
+        }
+        return matches
+      })
       
       // Only skip dates with all-day closures
       if (!allDayClosure) {
@@ -118,10 +139,12 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           label: format(date, 'EEEE, MMMM do'),
           isToday: i === 0
         })
+      } else {
+        console.log(`ReservationForm: Skipping date ${dateString} due to all-day closure:`, allDayClosure.closure_name)
       }
     }
     
-    console.log('Available dates generated:', dates.length)
+    console.log(`ReservationForm: Generated ${dates.length} available dates`)
     return dates
   }
 
@@ -136,7 +159,11 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       // Check if time falls within partial closure
       if (closure.start_time && closure.end_time) {
         if (time >= closure.start_time && time <= closure.end_time) {
-          console.log('Time slot blocked by partial closure:', { date, time, closure: closure.closure_name })
+          console.log('ReservationForm: Time slot blocked by partial closure:', { 
+            date, 
+            time, 
+            closure: closure.closure_name 
+          })
           return true
         }
       }
@@ -178,21 +205,24 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     
     const slots = []
     for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) { // Changed from 15 to 30
+      for (let minute = 0; minute < 60; minute += 30) {
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
         
         // Check if this time slot is blocked by a partial closure
-        if (!selectedDate || !isTimeSlotBlocked(selectedDate, timeString)) {
+        if (!isTimeSlotBlocked(selectedDate, timeString)) {
           const displayTime = format(parseISO(`2000-01-01T${timeString}`), 'h:mm a')
           
           slots.push({
             value: timeString,
             label: displayTime
           })
+        } else {
+          console.log(`ReservationForm: Skipping blocked time slot ${timeString}`)
         }
       }
     }
     
+    console.log(`ReservationForm: Generated ${slots.length} time slots for ${selectedDate}`)
     return slots
   }
 
@@ -307,12 +337,14 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       {/* Debug info for development */}
       {process.env.NODE_ENV === 'development' && (
         <div className="mb-4 p-3 bg-gray-100 rounded text-sm">
-          <strong>Debug:</strong> {closures.length} closures loaded
+          <strong>🐛 Debug:</strong> {closures.length} closures loaded
           {closures.length > 0 && (
-            <div>
+            <div className="mt-1 space-y-1">
               {closures.map((c, i) => (
-                <div key={i}>
-                  {c.closure_date} - {c.closure_name} ({c.all_day ? 'All day' : `${c.start_time}-${c.end_time}`})
+                <div key={i} className="text-xs">
+                  {i + 1}. {c.closure_date} - {c.closure_name} 
+                  {c.all_day ? ' (All day)' : ` (${c.start_time}-${c.end_time})`}
+                  <span className="text-gray-500 ml-2">ID: {c.id?.substring(0, 8)}</span>
                 </div>
               ))}
             </div>
@@ -341,6 +373,12 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           {errors.reservation_date && (
             <p className="text-red-500 text-sm mt-1">{errors.reservation_date.message}</p>
           )}
+          {/* Show closure info for selected date */}
+          {selectedDate && closures.some(c => c.closure_date === selectedDate && !c.all_day) && (
+            <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
+              <strong>Note:</strong> Some time slots may be unavailable due to partial closure.
+            </div>
+          )}
         </div>
 
         {/* Time Selection */}
@@ -366,6 +404,11 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           )}
           {!selectedDate && (
             <p className="text-gray-500 text-sm mt-1">Please select a date first</p>
+          )}
+          {selectedDate && getAvailableTimeSlots().length === 0 && (
+            <p className="text-red-500 text-sm mt-1">
+              No time slots available for this date. The restaurant may be closed.
+            </p>
           )}
         </div>
 

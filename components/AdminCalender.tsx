@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { format, addWeeks, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval, parseISO, isSameDay } from 'date-fns'
-import { ChevronLeft, ChevronRight, Calendar, Clock, Users, Phone, Mail } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar, Clock, Users, Phone, Mail, RefreshCw } from 'lucide-react'
 
 interface Reservation {
   id: string
@@ -38,85 +38,145 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [closures, setClosures] = useState<RestaurantClosure[]>([])
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Force refresh function that completely clears cache
+  const forceRefreshClosures = useCallback(async () => {
+    console.log('🔄 Force refreshing closures...')
+    setRefreshing(true)
+    
+    try {
+      // Add multiple cache-busting parameters
+      const timestamp = new Date().getTime()
+      const random = Math.random().toString(36).substring(7)
+      const url = `/api/closures?t=${timestamp}&r=${random}&force=true&nocache=1`
+      
+      console.log('Fetching from URL:', url)
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
+          'If-None-Match': '*'
+        },
+        cache: 'no-store'
+      })
+      
+      console.log('Closures API response status:', response.status)
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()))
+      
+      if (response.ok) {
+        const data = await response.json()
+        console.log('Fresh closures data received:', data)
+        console.log('Number of closures:', data.closures?.length || 0)
+        
+        const closuresData = data.closures || []
+        
+        // Log each closure for debugging
+        closuresData.forEach((closure: RestaurantClosure, index: number) => {
+          console.log(`Closure ${index + 1}:`, {
+            id: closure.id,
+            date: closure.closure_date,
+            name: closure.closure_name,
+            allDay: closure.all_day,
+            startTime: closure.start_time,
+            endTime: closure.end_time
+          })
+        })
+        
+        setClosures(closuresData)
+        
+        // Also force refresh reservations while we're at it
+        await fetchReservations()
+        
+        console.log('✅ Closures successfully refreshed')
+      } else {
+        console.error('Failed to fetch closures, status:', response.status)
+        const errorText = await response.text()
+        console.error('Error response:', errorText)
+      }
+    } catch (error) {
+      console.error('Force refresh closures error:', error)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [])
 
   // Fetch reservations directly from API
-  const fetchReservations = async () => {
-    setLoading(true)
+  const fetchReservations = useCallback(async () => {
     try {
       const response = await fetch('/api/admin/reservations', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`
-        }
+          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`,
+          'Cache-Control': 'no-cache'
+        },
+        cache: 'no-store'
       })
       
       if (response.ok) {
         const data = await response.json()
         const receivedReservations = data.reservations || []
         setReservations(receivedReservations)
+        console.log(`📅 Fetched ${receivedReservations.length} reservations`)
       }
     } catch (error) {
       console.error('Calendar: Error fetching reservations:', error)
-    } finally {
-      setLoading(false)
     }
-  }
-
-  // Fetch closures from API with cache busting
-  const fetchClosures = async () => {
-    try {
-      console.log('Fetching closures from API...')
-      
-      // Add cache-busting parameters
-      const timestamp = new Date().getTime()
-      const response = await fetch(`/api/closures?t=${timestamp}&r=${Math.random()}`, {
-        method: 'GET',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        }
-      })
-      
-      console.log('Closures API response status:', response.status)
-      
-      if (response.ok) {
-        const data = await response.json()
-        console.log('Closures API data:', data)
-        console.log('Closures array:', data.closures)
-        console.log('Number of closures:', data.closures?.length || 0)
-        
-        const closuresData = data.closures || []
-        setClosures(closuresData)
-        
-        if (closuresData.length > 0) {
-          console.log('Sample closure:', closuresData[0])
-        }
-      } else {
-        console.error('Failed to fetch closures, status:', response.status)
-      }
-    } catch (error) {
-      console.error('Calendar: Error fetching closures:', error)
-    }
-  }
+  }, [])
 
   // Fetch data on component mount with auto-refresh
   useEffect(() => {
+    console.log('🚀 AdminCalendar mounted, initializing data fetch...')
+    
     const fetchAllData = async () => {
-      await Promise.all([
-        fetchReservations(),
-        fetchClosures()
-      ])
+      setLoading(true)
+      try {
+        await Promise.all([
+          fetchReservations(),
+          forceRefreshClosures()
+        ])
+      } finally {
+        setLoading(false)
+      }
     }
     
     // Fetch immediately
     fetchAllData()
     
     // Set up periodic refresh every 30 seconds for real-time updates
-    const refreshInterval = setInterval(fetchAllData, 30000)
+    const refreshInterval = setInterval(() => {
+      console.log('⏰ Periodic refresh triggered')
+      fetchAllData()
+    }, 30000)
     
     // Cleanup interval on unmount
-    return () => clearInterval(refreshInterval)
-  }, [])
+    return () => {
+      console.log('🧹 Cleaning up AdminCalendar intervals')
+      clearInterval(refreshInterval)
+    }
+  }, [fetchReservations, forceRefreshClosures])
+
+  // Listen for custom refresh events from other components
+  useEffect(() => {
+    const handleClosureUpdate = () => {
+      console.log('📡 Received closure update event, refreshing...')
+      forceRefreshClosures()
+    }
+
+    // Listen for custom events
+    window.addEventListener('closureUpdated', handleClosureUpdate)
+    window.addEventListener('closureDeleted', handleClosureUpdate)
+    window.addEventListener('closureCreated', handleClosureUpdate)
+
+    return () => {
+      window.removeEventListener('closureUpdated', handleClosureUpdate)
+      window.removeEventListener('closureDeleted', handleClosureUpdate) 
+      window.removeEventListener('closureCreated', handleClosureUpdate)
+    }
+  }, [forceRefreshClosures])
 
   // Generate time slots based on day of week
   const getTimeSlotsForDay = (dayOfWeek: number) => {
@@ -146,7 +206,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     
     const slots = []
     for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) { // Changed from 15 to 30
+      for (let minute = 0; minute < 60; minute += 30) {
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
         slots.push(timeString)
       }
@@ -162,7 +222,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     const endHour = 21   // 9 PM
     
     for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) { // Changed from 15 to 30
+      for (let minute = 0; minute < 60; minute += 30) {
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
         slots.push(timeString)
       }
@@ -196,14 +256,18 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   // Check if a day is closed
   const getDayClosure = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd')
-    console.log('Checking closure for date:', dateStr)
-    console.log('Available closures:', closures.map(c => ({ date: c.closure_date, name: c.closure_name })))
+    console.log(`🔍 Checking closure for date: ${dateStr}`)
+    console.log('📋 Available closures:', closures.map(c => ({ 
+      date: c.closure_date, 
+      name: c.closure_name,
+      id: c.id 
+    })))
     
     const closure = closures.find(c => c.closure_date === dateStr)
     if (closure) {
-      console.log('Found closure:', closure)
+      console.log(`🚫 Found closure for ${dateStr}:`, closure)
     } else {
-      console.log('No closure found for', dateStr)
+      console.log(`✅ No closure found for ${dateStr}`)
     }
     
     return closure
@@ -214,7 +278,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     const closure = getDayClosure(date)
     if (!closure) return false
     
-    console.log('Checking time slot closure:', { 
+    console.log('🕐 Checking time slot closure:', { 
       date: format(date, 'yyyy-MM-dd'), 
       timeSlot, 
       closure: closure.closure_name,
@@ -225,7 +289,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     
     // If it's an all-day closure, the entire day is closed
     if (closure.all_day) {
-      console.log('All-day closure detected')
+      console.log('🚫 All-day closure detected')
       return true
     }
     
@@ -233,7 +297,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     if (closure.start_time && closure.end_time) {
       const slotTime = timeSlot
       const isClosed = slotTime >= closure.start_time && slotTime <= closure.end_time
-      console.log('Partial closure check:', { slotTime, startTime: closure.start_time, endTime: closure.end_time, isClosed })
+      console.log('⏰ Partial closure check:', { slotTime, startTime: closure.start_time, endTime: closure.end_time, isClosed })
       return isClosed
     }
     
@@ -281,13 +345,28 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     }
   }
 
+  // Manual refresh button handler
+  const handleManualRefresh = async () => {
+    console.log('🔄 Manual refresh triggered')
+    setLoading(true)
+    try {
+      await Promise.all([
+        fetchReservations(),
+        forceRefreshClosures()
+      ])
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="bg-white rounded-lg shadow-lg">
       {/* Loading Indicator */}
-      {loading && (
+      {(loading || refreshing) && (
         <div className="p-4 bg-blue-50 border border-blue-200 rounded-t-lg">
-          <div className="text-blue-800 text-sm">
-            🔄 Loading reservations...
+          <div className="text-blue-800 text-sm flex items-center">
+            <RefreshCw className={`w-4 h-4 mr-2 ${(loading || refreshing) ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing closures...' : 'Loading reservations...'}
           </div>
         </div>
       )}
@@ -296,10 +375,18 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
       {process.env.NODE_ENV === 'development' && (
         <div className="p-4 bg-yellow-50 border border-yellow-200">
           <div className="text-sm text-yellow-800">
-            <strong>Debug:</strong> {closures.length} closures loaded
+            <strong>🐛 Debug:</strong> {closures.length} closures loaded
             {closures.length > 0 && (
-              <div className="mt-1">
-                Closure dates: {closures.map(c => c.closure_date).join(', ')}
+              <div className="mt-1 space-y-1">
+                <div><strong>Closure dates:</strong> {closures.map(c => c.closure_date).join(', ')}</div>
+                <div><strong>Closure details:</strong></div>
+                {closures.map((c, i) => (
+                  <div key={c.id} className="ml-4 text-xs">
+                    {i + 1}. {c.closure_date} - {c.closure_name} 
+                    {c.all_day ? ' (All day)' : ` (${c.start_time}-${c.end_time})`}
+                    <span className="text-gray-600 ml-2">ID: {c.id.substring(0, 8)}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -324,11 +411,16 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
             </button>
             
             <button
-              onClick={() => {
-                fetchReservations()
-                fetchClosures()
-                goToCurrentWeek()
-              }}
+              onClick={handleManualRefresh}
+              disabled={loading || refreshing}
+              className="flex items-center px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 mr-1 ${(loading || refreshing) ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+            
+            <button
+              onClick={goToCurrentWeek}
               className="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
             >
               Today
@@ -353,17 +445,6 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
           </p>
         </div>
       </div>
-
-      {/* Debug Info (Development Only) */}
-      {process.env.NODE_ENV === 'development' && reservations.length > 0 && (
-        <div className="p-4 bg-gray-50 border-t border-gray-200">
-          <h4 className="font-medium text-gray-800 mb-2">Debug Info:</h4>
-          <div className="text-sm text-gray-700 space-y-1">
-            <div>Reservations loaded: {reservations.length}</div>
-            <div>Sample reservation: {JSON.stringify(reservations[0], null, 2)}</div>
-          </div>
-        </div>
-      )}
 
       {/* Calendar Grid */}
       <div className="overflow-x-auto">

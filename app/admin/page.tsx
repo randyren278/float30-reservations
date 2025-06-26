@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { format, parseISO, isToday, isFuture } from 'date-fns'
-import { Calendar, Clock, Users, Mail, Phone, CheckCircle, XCircle, AlertCircle, Download, Grid, List, Settings } from 'lucide-react'
+import { Calendar, Clock, Users, Mail, Phone, CheckCircle, XCircle, AlertCircle, Download, Grid, List, Settings, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import AdminCalendar from '@/components/AdminCalender'
 import ReservationModal from '@/components/ReservationModal'
@@ -26,6 +26,7 @@ export default function AdminDashboard() {
   const [password, setPassword] = useState('')
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState<'all' | 'today' | 'upcoming' | 'past'>('upcoming')
   const [statusFilter, setStatusFilter] = useState<'all' | 'confirmed' | 'cancelled' | 'completed' | 'no_show'>('all')
   const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'closures'>('calendar')
@@ -38,6 +39,29 @@ export default function AdminDashboard() {
     setIsAuthenticated(isAuth)
     if (isAuth) {
       fetchReservations()
+    }
+  }, [])
+
+  // Global refresh function that all components can use
+  const triggerGlobalRefresh = useCallback(async () => {
+    console.log('🔄 Admin Dashboard: Triggering global refresh')
+    setRefreshing(true)
+    
+    try {
+      // Refresh reservations
+      await fetchReservations()
+      
+      // Broadcast refresh event to all child components
+      console.log('📡 Broadcasting global refresh event')
+      window.dispatchEvent(new CustomEvent('globalRefresh', {
+        detail: { timestamp: new Date().toISOString() }
+      }))
+      
+      console.log('✅ Global refresh completed')
+    } catch (error) {
+      console.error('❌ Global refresh failed:', error)
+    } finally {
+      setRefreshing(false)
     }
   }, [])
 
@@ -90,10 +114,14 @@ export default function AdminDashboard() {
   const fetchReservations = async () => {
     setLoading(true)
     try {
+      console.log('📋 Admin Dashboard: Fetching reservations')
+      
       const response = await fetch('/api/admin/reservations', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`
-        }
+          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`,
+          'Cache-Control': 'no-cache'
+        },
+        cache: 'no-store'
       })
       
       if (response.status === 401) {
@@ -109,6 +137,7 @@ export default function AdminDashboard() {
         const data = await response.json()
         const receivedReservations = data.reservations || []
         setReservations(receivedReservations)
+        console.log(`✅ Admin Dashboard: Loaded ${receivedReservations.length} reservations`)
         
         if (receivedReservations.length === 0) {
           console.log('No reservations found in database')
@@ -118,6 +147,7 @@ export default function AdminDashboard() {
         toast.error(errorData.message || 'Failed to fetch reservations')
       }
     } catch (error) {
+      console.error('❌ Admin Dashboard: Error loading reservations:', error)
       toast.error('Error loading reservations')
     } finally {
       setLoading(false)
@@ -126,7 +156,7 @@ export default function AdminDashboard() {
 
   const updateReservationStatus = async (id: string, status: Reservation['status']) => {
     try {
-      console.log('Updating reservation status:', { id, status })
+      console.log('🔄 Admin Dashboard: Updating reservation status:', { id, status })
       
       const response = await fetch(`/api/admin/reservations/${id}`, {
         method: 'PATCH',
@@ -152,6 +182,12 @@ export default function AdminDashboard() {
       toast.error('Error updating reservation')
     }
   }
+
+  // Handle closure updates from HolidayManager
+  const handleClosureUpdate = useCallback(async () => {
+    console.log('🎯 Admin Dashboard: Closure update received, triggering global refresh')
+    await triggerGlobalRefresh()
+  }, [triggerGlobalRefresh])
 
   const exportReservations = () => {
     const filteredReservations = getFilteredReservations()
@@ -264,12 +300,25 @@ export default function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-bold text-gray-900">Reservation Dashboard</h1>
-            <button
-              onClick={handleLogout}
-              className="text-sm text-gray-600 hover:text-gray-900"
-            >
-              Logout
-            </button>
+            <div className="flex items-center space-x-4">
+              {/* Global Refresh Button */}
+              <button
+                onClick={triggerGlobalRefresh}
+                disabled={refreshing}
+                className="flex items-center px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50"
+                title="Refresh all data"
+              >
+                <RefreshCw className={`w-4 h-4 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Refreshing...' : 'Refresh All'}
+              </button>
+              
+              <button
+                onClick={handleLogout}
+                className="text-sm text-gray-600 hover:text-gray-900"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -426,7 +475,7 @@ export default function AdminDashboard() {
           />
         ) : viewMode === 'closures' ? (
           <HolidayManager
-            onClosureUpdate={fetchReservations}
+            onClosureUpdate={handleClosureUpdate}
           />
         ) : (
           /* List View (existing table) */
