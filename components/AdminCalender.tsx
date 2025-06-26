@@ -211,7 +211,13 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   // Quick status update
   const handleQuickStatusUpdate = async (e: React.MouseEvent, reservationId: string, newStatus: Reservation['status']) => {
     e.stopPropagation()
-    await handleStatusUpdate(reservationId, newStatus)
+    console.log('Calendar quick status update:', { reservationId, newStatus })
+    
+    try {
+      await handleStatusUpdate(reservationId, newStatus)
+    } catch (error) {
+      console.error('Quick status update failed:', error)
+    }
   }
 
   return (
@@ -272,18 +278,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
           </p>
         </div>
       </div>
-
-      {/* Debug Info (Development Only) */}
-      {process.env.NODE_ENV === 'development' && reservations.length > 0 && (
-        <div className="p-4 bg-gray-50 border-t border-gray-200">
-          <h4 className="font-medium text-gray-800 mb-2">Debug Info:</h4>
-          <div className="text-sm text-gray-700 space-y-1">
-            <div>Reservations loaded: {reservations.length}</div>
-            <div>Sample reservation: {JSON.stringify(reservations[0], null, 2)}</div>
-          </div>
-        </div>
-      )}
-
+      
       {/* Calendar Grid */}
       <div className="overflow-x-auto">
         <div className="min-w-full">

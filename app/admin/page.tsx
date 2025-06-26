@@ -126,19 +126,29 @@ export default function AdminDashboard() {
 
   const updateReservationStatus = async (id: string, status: Reservation['status']) => {
     try {
+      console.log('Updating reservation status:', { id, status })
+      
       const response = await fetch(`/api/admin/reservations/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`
+        },
         body: JSON.stringify({ status })
       })
+
+      console.log('Status update response:', response.status)
 
       if (response.ok) {
         await fetchReservations()
         toast.success(`Reservation ${status}`)
       } else {
-        toast.error('Failed to update reservation')
+        const errorData = await response.json()
+        console.error('Status update failed:', errorData)
+        toast.error(errorData.message || 'Failed to update reservation')
       }
     } catch (error) {
+      console.error('Status update error:', error)
       toast.error('Error updating reservation')
     }
   }

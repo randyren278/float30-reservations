@@ -45,6 +45,7 @@ export default function ReservationModal({ reservation, isOpen, onClose, onStatu
   }
 
   const handleStatusUpdate = (newStatus: Reservation['status']) => {
+    console.log('Modal status update:', { reservationId: reservation.id, newStatus })
     onStatusUpdate(reservation.id, newStatus)
     onClose()
   }

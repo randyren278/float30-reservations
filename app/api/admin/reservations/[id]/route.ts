@@ -10,7 +10,12 @@ const updateStatusSchema = z.object({
 // Simple authentication check
 function isAuthenticated(request: NextRequest): boolean {
   const authCookie = request.cookies.get('admin_session')
-  return authCookie?.value === 'true'
+  if (authCookie?.value === 'true') return true
+  
+  const authHeader = request.headers.get('authorization')
+  if (authHeader === `Bearer ${process.env.ADMIN_PASSWORD}`) return true
+  
+  return false
 }
 
 // PATCH /api/admin/reservations/[id] - Update reservation status
@@ -21,6 +26,7 @@ export async function PATCH(
   try {
     // Check authentication
     if (!isAuthenticated(request)) {
+      console.log('Authentication failed for reservation update')
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -40,9 +46,12 @@ export async function PATCH(
 
     // Parse and validate request body
     const body = await request.json()
+    console.log('Update request body:', body)
+    
     const validationResult = updateStatusSchema.safeParse(body)
     
     if (!validationResult.success) {
+      console.log('Validation failed:', validationResult.error)
       return NextResponse.json(
         { 
           error: 'Validation failed', 
@@ -65,6 +74,8 @@ export async function PATCH(
       )
     }
 
+    console.log('Updating reservation status:', { id, status, currentStatus: currentReservation.status })
+
     // Update reservation status
     const updatedReservation = await reservationService.updateReservationStatus(id, status)
 
@@ -78,6 +89,8 @@ export async function PATCH(
       }
     }
 
+    console.log('Successfully updated reservation status')
+
     return NextResponse.json({
       success: true,
       message: `Reservation status updated to ${status}`,
@@ -89,7 +102,8 @@ export async function PATCH(
     return NextResponse.json(
       { 
         error: 'Internal server error',
-        message: 'Failed to update reservation status.'
+        message: 'Failed to update reservation status.',
+        details: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
     )
