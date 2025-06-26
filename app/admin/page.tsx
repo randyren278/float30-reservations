@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { format, parseISO, isToday, isFuture } from 'date-fns'
-import { Calendar, Clock, Users, Mail, Phone, CheckCircle, XCircle, AlertCircle, Download } from 'lucide-react'
+import { Calendar, Clock, Users, Mail, Phone, CheckCircle, XCircle, AlertCircle, Download, Grid, List } from 'lucide-react'
 import toast from 'react-hot-toast'
+import AdminCalendar from '@/components/AdminCalender'
+import ReservationModal from '@/components/ReservationModal'
 
 interface Reservation {
   id: string
@@ -25,6 +27,9 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState<'all' | 'today' | 'upcoming' | 'past'>('upcoming')
   const [statusFilter, setStatusFilter] = useState<'all' | 'confirmed' | 'cancelled' | 'completed' | 'no_show'>('all')
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar')
+  const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
   // Check authentication on mount
   useEffect(() => {
@@ -54,11 +59,9 @@ export default function AdminDashboard() {
         toast.success('Login successful')
       } else {
         const data = await response.json()
-        console.error('Login failed:', data)
         toast.error(data.error || 'Invalid password')
       }
     } catch (error) {
-      console.error('Login error:', error)
       toast.error('Login failed')
     } finally {
       setLoading(false)
@@ -73,18 +76,24 @@ export default function AdminDashboard() {
     setReservations([])
   }
 
+  const handleReservationClick = (reservation: Reservation) => {
+    setSelectedReservation(reservation)
+    setIsModalOpen(true)
+  }
+
+  const handleModalClose = () => {
+    setSelectedReservation(null)
+    setIsModalOpen(false)
+  }
+
   const fetchReservations = async () => {
     setLoading(true)
     try {
-      console.log('Fetching reservations from API...')
-      
       const response = await fetch('/api/admin/reservations', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`
         }
       })
-      
-      console.log('API Response status:', response.status)
       
       if (response.status === 401) {
         // Not authenticated, redirect to login
@@ -97,19 +106,17 @@ export default function AdminDashboard() {
       
       if (response.ok) {
         const data = await response.json()
-        console.log('Received data:', data)
-        setReservations(data.reservations || [])
+        const receivedReservations = data.reservations || []
+        setReservations(receivedReservations)
         
-        if (data.reservations?.length === 0) {
+        if (receivedReservations.length === 0) {
           console.log('No reservations found in database')
         }
       } else {
         const errorData = await response.json()
-        console.error('API Error:', errorData)
         toast.error(errorData.message || 'Failed to fetch reservations')
       }
     } catch (error) {
-      console.error('Fetch error:', error)
       toast.error('Error loading reservations')
     } finally {
       setLoading(false)
@@ -306,175 +313,230 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Filters and Actions */}
+        {/* View Toggle and Filters */}
         <div className="bg-white rounded-lg shadow p-6 mb-8">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-wrap gap-4">
-              <select
-                value={filter}
-                onChange={(e) => setFilter(e.target.value as any)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              >
-                <option value="all">All Reservations</option>
-                <option value="today">Today</option>
-                <option value="upcoming">Upcoming</option>
-                <option value="past">Past</option>
-              </select>
-              
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              >
-                <option value="all">All Statuses</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="cancelled">Cancelled</option>
-                <option value="completed">Completed</option>
-                <option value="no_show">No Show</option>
-              </select>
+            {/* View Mode Toggle */}
+            <div className="flex items-center space-x-2">
+              <div className="flex bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => setViewMode('calendar')}
+                  className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    viewMode === 'calendar'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Grid className="w-4 h-4 mr-2" />
+                  Calendar View
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    viewMode === 'list'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <List className="w-4 h-4 mr-2" />
+                  List View
+                </button>
+              </div>
             </div>
-            
-            <div className="flex gap-2">
-              <button
-                onClick={fetchReservations}
-                disabled={loading}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
-              >
-                {loading ? 'Loading...' : 'Refresh'}
-              </button>
+
+            {/* Filters */}
+            <div className="flex flex-wrap gap-4">
+              {viewMode === 'list' && (
+                <>
+                  <select
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value as any)}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="all">All Reservations</option>
+                    <option value="today">Today</option>
+                    <option value="upcoming">Upcoming</option>
+                    <option value="past">Past</option>
+                  </select>
+                  
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as any)}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="confirmed">Confirmed</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="completed">Completed</option>
+                    <option value="no_show">No Show</option>
+                  </select>
+                </>
+              )}
               
-              <button
-                onClick={exportReservations}
-                className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 flex items-center gap-2"
-              >
-                <Download className="w-4 h-4" />
-                Export CSV
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={fetchReservations}
+                  disabled={loading}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {loading ? 'Loading...' : 'Refresh'}
+                </button>
+                
+                <button
+                  onClick={exportReservations}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Export CSV
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Reservations Table */}
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Date & Time
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Customer
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Party Size
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredReservations.map((reservation) => (
-                  <tr key={reservation.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <Calendar className="w-4 h-4 text-gray-400 mr-2" />
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {format(parseISO(reservation.reservation_date), 'MMM do, yyyy')}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {format(parseISO(`2000-01-01T${reservation.reservation_time}`), 'h:mm a')}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">{reservation.name}</div>
-                        <div className="text-sm text-gray-500 flex items-center">
-                          <Mail className="w-3 h-3 mr-1" />
-                          {reservation.email}
-                        </div>
-                        {reservation.phone && (
-                          <div className="text-sm text-gray-500 flex items-center">
-                            <Phone className="w-3 h-3 mr-1" />
-                            {reservation.phone}
-                          </div>
-                        )}
-                        {reservation.special_requests && (
-                          <div className="text-xs text-orange-600 mt-1">
-                            Special: {reservation.special_requests}
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <Users className="w-4 h-4 text-gray-400 mr-2" />
-                        <span className="text-sm text-gray-900">{reservation.party_size}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        {getStatusIcon(reservation.status)}
-                        <span className={`ml-2 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(reservation.status)}`}>
-                          {reservation.status}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <div className="flex space-x-2">
-                        {reservation.status === 'confirmed' && (
-                          <>
-                            <button
-                              onClick={() => updateReservationStatus(reservation.id, 'completed')}
-                              className="text-blue-600 hover:text-blue-900"
-                            >
-                              Complete
-                            </button>
-                            <button
-                              onClick={() => updateReservationStatus(reservation.id, 'no_show')}
-                              className="text-orange-600 hover:text-orange-900"
-                            >
-                              No Show
-                            </button>
-                            <button
-                              onClick={() => updateReservationStatus(reservation.id, 'cancelled')}
-                              className="text-red-600 hover:text-red-900"
-                            >
-                              Cancel
-                            </button>
-                          </>
-                        )}
-                        {reservation.status === 'cancelled' && (
-                          <button
-                            onClick={() => updateReservationStatus(reservation.id, 'confirmed')}
-                            className="text-green-600 hover:text-green-900"
-                          >
-                            Restore
-                          </button>
-                        )}
-                      </div>
-                    </td>
+        {/* Calendar or List View */}
+        {viewMode === 'calendar' ? (
+          <AdminCalendar
+            onReservationClick={handleReservationClick}
+            onStatusUpdate={updateReservationStatus}
+          />
+        ) : (
+          /* List View (existing table) */
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Date & Time
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Customer
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Party Size
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          
-          {filteredReservations.length === 0 && (
-            <div className="text-center py-12">
-              <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No reservations found</h3>
-              <p className="text-gray-500">No reservations match your current filters.</p>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredReservations.map((reservation) => (
+                    <tr key={reservation.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <Calendar className="w-4 h-4 text-gray-400 mr-2" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {format(parseISO(reservation.reservation_date), 'MMM do, yyyy')}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {format(parseISO(`2000-01-01T${reservation.reservation_time}`), 'h:mm a')}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">{reservation.name}</div>
+                          <div className="text-sm text-gray-500 flex items-center">
+                            <Mail className="w-3 h-3 mr-1" />
+                            {reservation.email}
+                          </div>
+                          {reservation.phone && (
+                            <div className="text-sm text-gray-500 flex items-center">
+                              <Phone className="w-3 h-3 mr-1" />
+                              {reservation.phone}
+                            </div>
+                          )}
+                          {reservation.special_requests && (
+                            <div className="text-xs text-orange-600 mt-1">
+                              Special: {reservation.special_requests}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <Users className="w-4 h-4 text-gray-400 mr-2" />
+                          <span className="text-sm text-gray-900">{reservation.party_size}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          {getStatusIcon(reservation.status)}
+                          <span className={`ml-2 inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(reservation.status)}`}>
+                            {reservation.status}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => handleReservationClick(reservation)}
+                            className="text-blue-600 hover:text-blue-900"
+                          >
+                            View Details
+                          </button>
+                          {reservation.status === 'confirmed' && (
+                            <>
+                              <button
+                                onClick={() => updateReservationStatus(reservation.id, 'completed')}
+                                className="text-blue-600 hover:text-blue-900"
+                              >
+                                Complete
+                              </button>
+                              <button
+                                onClick={() => updateReservationStatus(reservation.id, 'no_show')}
+                                className="text-orange-600 hover:text-orange-900"
+                              >
+                                No Show
+                              </button>
+                              <button
+                                onClick={() => updateReservationStatus(reservation.id, 'cancelled')}
+                                className="text-red-600 hover:text-red-900"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          )}
+                          {reservation.status === 'cancelled' && (
+                            <button
+                              onClick={() => updateReservationStatus(reservation.id, 'confirmed')}
+                              className="text-green-600 hover:text-green-900"
+                            >
+                              Restore
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
-        </div>
+            
+            {filteredReservations.length === 0 && (
+              <div className="text-center py-12">
+                <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No reservations found</h3>
+                <p className="text-gray-500">No reservations match your current filters.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Reservation Details Modal */}
+        <ReservationModal
+          reservation={selectedReservation}
+          isOpen={isModalOpen}
+          onClose={handleModalClose}
+          onStatusUpdate={updateReservationStatus}
+        />
       </div>
     </div>
   )
