@@ -1,8 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    appDir: true,
-  },
   env: {
     RESTAURANT_NAME: process.env.RESTAURANT_NAME,
     RESTAURANT_EMAIL: process.env.RESTAURANT_EMAIL,
@@ -21,7 +18,7 @@ const nextConfig = {
           { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization' },
         ],
       },
-    ]
+    ];
   },
   async redirects() {
     return [
@@ -30,8 +27,8 @@ const nextConfig = {
         destination: '/',
         permanent: true,
       },
-    ]
+    ];
   },
-}
+};
 
-module.exports = nextConfig
+module.exports = nextConfig;
