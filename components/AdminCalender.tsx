@@ -17,6 +17,16 @@ interface Reservation {
   created_at: string
 }
 
+interface RestaurantClosure {
+  id: string
+  closure_date: string
+  closure_name: string
+  closure_reason?: string
+  all_day: boolean
+  start_time?: string
+  end_time?: string
+}
+
 interface AdminCalendarProps {
   onReservationClick?: (reservation: Reservation) => void
   onStatusUpdate?: (id: string, status: Reservation['status']) => void
@@ -26,6 +36,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   const [currentWeek, setCurrentWeek] = useState(new Date())
   const [timeSlots, setTimeSlots] = useState<string[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
+  const [closures, setClosures] = useState<RestaurantClosure[]>([])
   const [loading, setLoading] = useState(false)
 
   // Fetch reservations directly from API
@@ -50,9 +61,24 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     }
   }
 
+  // Fetch closures from API
+  const fetchClosures = async () => {
+    try {
+      const response = await fetch('/api/closures')
+      
+      if (response.ok) {
+        const data = await response.json()
+        setClosures(data.closures || [])
+      }
+    } catch (error) {
+      console.error('Calendar: Error fetching closures:', error)
+    }
+  }
+
   // Fetch data on component mount
   useEffect(() => {
     fetchReservations()
+    fetchClosures()
   }, [])
 
   // Generate time slots based on day of week
@@ -130,6 +156,29 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     }
   }
 
+  // Check if a day is closed
+  const getDayClosure = (date: Date) => {
+    const dateStr = format(date, 'yyyy-MM-dd')
+    return closures.find(c => c.closure_date === dateStr)
+  }
+
+  // Check if a specific time slot is during a closure
+  const isTimeSlotClosed = (date: Date, timeSlot: string) => {
+    const closure = getDayClosure(date)
+    if (!closure) return false
+    
+    // If it's an all-day closure, the entire day is closed
+    if (closure.all_day) return true
+    
+    // For partial closures, check if time falls within closure period
+    if (closure.start_time && closure.end_time) {
+      const slotTime = timeSlot
+      return slotTime >= closure.start_time && slotTime <= closure.end_time
+    }
+    
+    return false
+  }
+
   // Get reservations for a specific date and time
   const getReservationsForSlot = (date: Date, time: string) => {
     const dateStr = format(date, 'yyyy-MM-dd')
@@ -196,6 +245,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
             <button
               onClick={() => {
                 fetchReservations()
+                fetchClosures()
                 goToCurrentWeek()
               }}
               className="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
@@ -223,6 +273,17 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
         </div>
       </div>
 
+      {/* Debug Info (Development Only) */}
+      {process.env.NODE_ENV === 'development' && reservations.length > 0 && (
+        <div className="p-4 bg-gray-50 border-t border-gray-200">
+          <h4 className="font-medium text-gray-800 mb-2">Debug Info:</h4>
+          <div className="text-sm text-gray-700 space-y-1">
+            <div>Reservations loaded: {reservations.length}</div>
+            <div>Sample reservation: {JSON.stringify(reservations[0], null, 2)}</div>
+          </div>
+        </div>
+      )}
+
       {/* Calendar Grid */}
       <div className="overflow-x-auto">
         <div className="min-w-full">
@@ -231,22 +292,33 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
             <div className="p-3 text-sm font-medium text-gray-600 border-r border-gray-200">
               Time
             </div>
-            {openDays.map((day) => (
-              <div
-                key={day.toISOString()}
-                className="p-3 text-center border-r border-gray-200 last:border-r-0"
-              >
-                <div className="text-sm font-medium text-gray-900">
-                  {format(day, 'EEE')}
+            {openDays.map((day) => {
+              const dayClosure = getDayClosure(day)
+              
+              return (
+                <div
+                  key={day.toISOString()}
+                  className={`p-3 text-center border-r border-gray-200 last:border-r-0 ${
+                    dayClosure ? 'bg-red-50 border-red-200' : ''
+                  }`}
+                >
+                  <div className={`text-sm font-medium ${dayClosure ? 'text-red-700' : 'text-gray-900'}`}>
+                    {format(day, 'EEE')}
+                  </div>
+                  <div className={`text-lg font-semibold mt-1 ${dayClosure ? 'text-red-800' : 'text-gray-700'}`}>
+                    {format(day, 'd')}
+                  </div>
+                  <div className={`text-xs ${dayClosure ? 'text-red-600' : 'text-gray-500'}`}>
+                    {format(day, 'MMM')}
+                  </div>
+                  {dayClosure && (
+                    <div className="text-xs font-medium text-red-700 mt-1">
+                      CLOSED
+                    </div>
+                  )}
                 </div>
-                <div className="text-lg font-semibold text-gray-700 mt-1">
-                  {format(day, 'd')}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {format(day, 'MMM')}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
 
           {/* Time Slots */}
@@ -269,19 +341,34 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
                   const dayOfWeek = day.getDay()
                   const validSlotsForDay = getTimeSlotsForDay(dayOfWeek)
                   const isValidSlot = validSlotsForDay.includes(timeSlot)
-                  const dayReservations = isValidSlot ? getReservationsForSlot(day, timeSlot) : []
+                  const isTimeSlotClosedForDay = isTimeSlotClosed(day, timeSlot)
+                  const dayReservations = (isValidSlot && !isTimeSlotClosedForDay) ? getReservationsForSlot(day, timeSlot) : []
                   const isToday = isSameDay(day, new Date())
+                  const dayClosure = getDayClosure(day)
                   
                   return (
                     <div
                       key={`${day.toISOString()}-${timeSlot}`}
                       className={`p-1 border-r border-gray-200 last:border-r-0 min-h-[60px] ${
                         isToday ? 'bg-blue-50' : ''
-                      } ${!isValidSlot ? 'bg-gray-100' : ''}`}
+                      } ${!isValidSlot ? 'bg-gray-100' : ''} ${
+                        isTimeSlotClosedForDay ? 'bg-red-100' : ''
+                      }`}
                     >
                       {!isValidSlot ? (
                         <div className="h-full flex items-center justify-center text-gray-400">
                           <div className="text-xs">Closed</div>
+                        </div>
+                      ) : isTimeSlotClosedForDay ? (
+                        <div className="h-full flex items-center justify-center">
+                          <div className="text-center">
+                            <div className="text-xs font-medium text-red-700">
+                              {dayClosure?.all_day ? 'CLOSED' : 'HOLIDAY'}
+                            </div>
+                            <div className="text-xs text-red-600 mt-1">
+                              {dayClosure?.closure_name}
+                            </div>
+                          </div>
                         </div>
                       ) : (
                         <>
@@ -403,15 +490,40 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
             <div className="text-sm text-blue-800">Completed</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-purple-600">
-              {reservations.filter(r => {
-                const rDate = parseISO(r.reservation_date)
-                return rDate >= weekStart && rDate <= weekEnd && r.status !== 'cancelled'
-              }).reduce((sum, r) => sum + r.party_size, 0)}
+            <div className="text-2xl font-bold text-red-600">
+              {closures.filter(c => {
+                const cDate = parseISO(c.closure_date)
+                return cDate >= weekStart && cDate <= weekEnd
+              }).length}
             </div>
-            <div className="text-sm text-purple-800">Total Guests</div>
+            <div className="text-sm text-red-800">Closures</div>
           </div>
         </div>
+        
+        {/* Show closure details if any in current week */}
+        {closures.filter(c => {
+          const cDate = parseISO(c.closure_date)
+          return cDate >= weekStart && cDate <= weekEnd
+        }).length > 0 && (
+          <div className="mt-4 pt-4 border-t border-blue-300">
+            <h4 className="text-sm font-semibold text-blue-900 mb-2">Closures This Week:</h4>
+            <div className="space-y-1">
+              {closures.filter(c => {
+                const cDate = parseISO(c.closure_date)
+                return cDate >= weekStart && cDate <= weekEnd
+              }).map(closure => (
+                <div key={closure.id} className="text-sm text-red-700 bg-red-100 rounded px-2 py-1">
+                  <strong>{format(parseISO(closure.closure_date), 'EEE, MMM d')}</strong> - {closure.closure_name}
+                  {!closure.all_day && closure.start_time && closure.end_time && (
+                    <span className="ml-2 text-red-600">
+                      ({format(parseISO(`2000-01-01T${closure.start_time}`), 'h:mm a')} - {format(parseISO(`2000-01-01T${closure.end_time}`), 'h:mm a')})
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format, addDays, parseISO } from 'date-fns'
@@ -18,6 +18,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
   const [reservationDetails, setReservationDetails] = useState<any>(null)
+  const [closedDates, setClosedDates] = useState<string[]>([])
 
   const {
     register,
@@ -34,23 +35,43 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     }
   })
 
+  // Fetch closed dates
+  useEffect(() => {
+    const fetchClosedDates = async () => {
+      try {
+        const response = await fetch('/api/closures')
+        if (response.ok) {
+          const data = await response.json()
+          const dates = data.closures?.map((c: any) => c.closure_date) || []
+          setClosedDates(dates)
+        }
+      } catch (error) {
+        console.error('Error fetching closed dates:', error)
+      }
+    }
+    fetchClosedDates()
+  }, [])
+
   const selectedDate = watch('reservation_date')
   const selectedTime = watch('reservation_time')
 
-  // Generate available dates (next 30 days, open all days)
+  // Generate available dates (next 30 days, open all days, excluding closures)
   const getAvailableDates = () => {
     const dates = []
     const today = new Date()
     
     for (let i = 0; i < 30; i++) {
       const date = addDays(today, i)
+      const dateString = format(date, 'yyyy-MM-dd')
       
-      // All days are now open
-      dates.push({
-        value: format(date, 'yyyy-MM-dd'),
-        label: format(date, 'EEEE, MMMM do'),
-        isToday: i === 0
-      })
+      // Skip if restaurant is closed on this date
+      if (!closedDates.includes(dateString)) {
+        dates.push({
+          value: dateString,
+          label: format(date, 'EEEE, MMMM do'),
+          isToday: i === 0
+        })
+      }
     }
     
     return dates

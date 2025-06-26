@@ -60,11 +60,52 @@ INSERT INTO restaurant_settings (setting_key, setting_value, description) VALUES
 ('reservations_per_slot', '3', 'Maximum reservations allowed per time slot'),
 ('closed_days', '', 'Days when restaurant is closed (empty = open all days)');
 
+-- Restaurant closures table for holidays and special closures
+CREATE TABLE restaurant_closures (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    closure_date DATE NOT NULL,
+    closure_name VARCHAR(100) NOT NULL,
+    closure_reason VARCHAR(255),
+    all_day BOOLEAN DEFAULT true,
+    start_time TIME,
+    end_time TIME,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Ensure no duplicate closures for same date
+    CONSTRAINT unique_closure_date UNIQUE (closure_date)
+);
+
+-- Insert some common holidays as examples
+INSERT INTO restaurant_closures (closure_date, closure_name, closure_reason) VALUES
+('2025-12-25', 'Christmas Day', 'Statutory Holiday'),
+('2025-01-01', 'New Year''s Day', 'Statutory Holiday'),
+('2025-07-01', 'Canada Day', 'Statutory Holiday'),
+('2025-12-26', 'Boxing Day', 'Statutory Holiday');
+
 -- Create indexes for better performance
-CREATE INDEX idx_reservations_date_time ON reservations(reservation_date, reservation_time);
-CREATE INDEX idx_reservations_email ON reservations(email);
-CREATE INDEX idx_reservations_status ON reservations(status);
-CREATE INDEX idx_reservations_created_at ON reservations(created_at);
+CREATE INDEX idx_restaurant_closures_date ON restaurant_closures(closure_date);
+CREATE INDEX idx_restaurant_closures_all_day ON restaurant_closures(all_day);
+
+-- Trigger to automatically update updated_at
+CREATE TRIGGER update_restaurant_closures_updated_at 
+    BEFORE UPDATE ON restaurant_closures 
+    FOR EACH ROW 
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Row Level Security (RLS) policies
+ALTER TABLE restaurant_closures ENABLE ROW LEVEL SECURITY;
+
+-- Policy for public access to read closures
+CREATE POLICY "Allow public to read restaurant closures" 
+    ON restaurant_closures FOR SELECT 
+    USING (true);
+
+-- Policy for admin access to all operations
+CREATE POLICY "Allow admin full access to restaurant closures" 
+    ON restaurant_closures FOR ALL 
+    USING (true) 
+    WITH CHECK (true);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

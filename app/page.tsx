@@ -225,7 +225,7 @@ export default function ReservationsPage() {
           <div className="text-center">
             <h3 className="text-lg font-semibold mb-2">Float 30 Restaurant</h3>
             <p className="text-gray-400 text-sm mb-4">
-              Exceptional dining experiences in the heart of Vancouver
+              Exceptional dining experiences in Port Moody, BC
             </p>
             <div className="flex justify-center space-x-6 text-sm">
               <a href="tel:+1-778-300-1378" className="text-gray-400 hover:text-white">

@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import { format, parseISO, isToday, isFuture } from 'date-fns'
-import { Calendar, Clock, Users, Mail, Phone, CheckCircle, XCircle, AlertCircle, Download, Grid, List } from 'lucide-react'
+import { Calendar, Clock, Users, Mail, Phone, CheckCircle, XCircle, AlertCircle, Download, Grid, List, Settings } from 'lucide-react'
 import toast from 'react-hot-toast'
 import AdminCalendar from '@/components/AdminCalender'
 import ReservationModal from '@/components/ReservationModal'
+import HolidayManager from '@/components/HolidayManager'
 
 interface Reservation {
   id: string
@@ -27,7 +28,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState<'all' | 'today' | 'upcoming' | 'past'>('upcoming')
   const [statusFilter, setStatusFilter] = useState<'all' | 'confirmed' | 'cancelled' | 'completed' | 'no_show'>('all')
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar')
+  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'closures'>('calendar')
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
@@ -328,7 +329,7 @@ export default function AdminDashboard() {
                   }`}
                 >
                   <Grid className="w-4 h-4 mr-2" />
-                  Calendar View
+                  Calendar
                 </button>
                 <button
                   onClick={() => setViewMode('list')}
@@ -339,7 +340,18 @@ export default function AdminDashboard() {
                   }`}
                 >
                   <List className="w-4 h-4 mr-2" />
-                  List View
+                  List
+                </button>
+                <button
+                  onClick={() => setViewMode('closures')}
+                  className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    viewMode === 'closures'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Settings className="w-4 h-4 mr-2" />
+                  Closures
                 </button>
               </div>
             </div>
@@ -373,32 +385,38 @@ export default function AdminDashboard() {
                 </>
               )}
               
-              <div className="flex gap-2">
-                <button
-                  onClick={fetchReservations}
-                  disabled={loading}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {loading ? 'Loading...' : 'Refresh'}
-                </button>
-                
-                <button
-                  onClick={exportReservations}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 flex items-center gap-2"
-                >
-                  <Download className="w-4 h-4" />
-                  Export CSV
-                </button>
-              </div>
+              {viewMode !== 'closures' && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={fetchReservations}
+                    disabled={loading}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {loading ? 'Loading...' : 'Refresh'}
+                  </button>
+                  
+                  <button
+                    onClick={exportReservations}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 flex items-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export CSV
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Calendar or List View */}
+        {/* Calendar, List, or Closures View */}
         {viewMode === 'calendar' ? (
           <AdminCalendar
             onReservationClick={handleReservationClick}
             onStatusUpdate={updateReservationStatus}
+          />
+        ) : viewMode === 'closures' ? (
+          <HolidayManager
+            onClosureUpdate={fetchReservations}
           />
         ) : (
           /* List View (existing table) */
