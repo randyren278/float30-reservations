@@ -52,7 +52,13 @@ export async function POST(request: NextRequest) {
 
     // Send confirmation emails
     try {
-      await emailService.sendReservationEmails(reservation)
+      console.log('Sending emails for reservation:', reservation.id)
+      const emailResults = await emailService.sendReservationEmails(reservation)
+      console.log('Email results:', {
+        customerConfirmation: emailResults.customerConfirmation ? 'SUCCESS' : 'FAILED',
+        restaurantNotification: emailResults.restaurantNotification ? 'SUCCESS' : 'FAILED',
+        errors: emailResults.errors
+      })
     } catch (emailError) {
       // Log email error but don't fail the reservation
       console.error('Email sending failed:', emailError)

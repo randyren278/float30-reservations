@@ -32,25 +32,34 @@ export async function POST(request: NextRequest) {
 
     // Check password
     if (password !== ADMIN_PASSWORD) {
+      console.log('Invalid admin password attempt')
       return NextResponse.json(
         { error: 'Invalid password' },
         { status: 401 }
       )
     }
 
-    // Success response
-    return NextResponse.json(
+    console.log('Admin login successful')
+
+    // Success response with proper cookie
+    const response = NextResponse.json(
       { 
         success: true,
         message: 'Login successful'
       },
-      { 
-        status: 200,
-        headers: {
-          'Set-Cookie': `admin_session=true; HttpOnly; SameSite=Strict; Max-Age=3600; Path=/admin`
-        }
-      }
+      { status: 200 }
     )
+
+    // Set cookie for browser
+    response.cookies.set('admin_session', 'true', {
+      httpOnly: false, // Allow JavaScript access
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 3600, // 1 hour
+      path: '/'
+    })
+
+    return response
 
   } catch (error) {
     console.error('Admin login error:', error)

@@ -48,14 +48,17 @@ export default function AdminDashboard() {
 
       if (response.ok) {
         localStorage.setItem('admin_authenticated', 'true')
+        localStorage.setItem('admin_password', password) // Store for API calls
         setIsAuthenticated(true)
         await fetchReservations()
         toast.success('Login successful')
       } else {
         const data = await response.json()
+        console.error('Login failed:', data)
         toast.error(data.error || 'Invalid password')
       }
     } catch (error) {
+      console.error('Login error:', error)
       toast.error('Login failed')
     } finally {
       setLoading(false)
@@ -65,6 +68,7 @@ export default function AdminDashboard() {
 
   const handleLogout = () => {
     localStorage.removeItem('admin_authenticated')
+    localStorage.removeItem('admin_password')
     setIsAuthenticated(false)
     setReservations([])
   }
@@ -72,14 +76,40 @@ export default function AdminDashboard() {
   const fetchReservations = async () => {
     setLoading(true)
     try {
-      const response = await fetch('/api/admin/reservations')
+      console.log('Fetching reservations from API...')
+      
+      const response = await fetch('/api/admin/reservations', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`
+        }
+      })
+      
+      console.log('API Response status:', response.status)
+      
+      if (response.status === 401) {
+        // Not authenticated, redirect to login
+        setIsAuthenticated(false)
+        localStorage.removeItem('admin_authenticated')
+        localStorage.removeItem('admin_password')
+        toast.error('Session expired. Please log in again.')
+        return
+      }
+      
       if (response.ok) {
         const data = await response.json()
-        setReservations(data.reservations)
+        console.log('Received data:', data)
+        setReservations(data.reservations || [])
+        
+        if (data.reservations?.length === 0) {
+          console.log('No reservations found in database')
+        }
       } else {
-        toast.error('Failed to fetch reservations')
+        const errorData = await response.json()
+        console.error('API Error:', errorData)
+        toast.error(errorData.message || 'Failed to fetch reservations')
       }
     } catch (error) {
+      console.error('Fetch error:', error)
       toast.error('Error loading reservations')
     } finally {
       setLoading(false)

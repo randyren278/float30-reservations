@@ -220,6 +220,8 @@ export const emailService = {
     try {
       const emailContent = getCustomerConfirmationEmail(reservation)
       
+      console.log('Sending customer confirmation to:', reservation.email)
+      
       const { data, error } = await resend.emails.send({
         from: `${RESTAURANT_NAME} <onboarding@resend.dev>`,
         reply_to: RESTAURANT_EMAIL,
@@ -234,6 +236,7 @@ export const emailService = {
         throw new Error('Failed to send confirmation email')
       }
 
+      console.log('Customer confirmation sent successfully:', data)
       return data
     } catch (error) {
       console.error('Email service error:', error)
@@ -245,6 +248,8 @@ export const emailService = {
   async sendRestaurantNotification(reservation: Reservation) {
     try {
       const emailContent = getRestaurantNotificationEmail(reservation)
+      
+      console.log('Sending restaurant notification to:', RESTAURANT_EMAIL)
       
       const { data, error } = await resend.emails.send({
         from: `Reservation System <onboarding@resend.dev>`,
@@ -261,6 +266,7 @@ export const emailService = {
         // Customer confirmation is more important
       }
 
+      console.log('Restaurant notification sent successfully:', data)
       return data
     } catch (error) {
       console.error('Restaurant notification error:', error)
@@ -277,7 +283,13 @@ export const emailService = {
 
     // Check if customer confirmation failed (this is critical)
     if (results[0].status === 'rejected') {
+      console.error('Customer confirmation failed:', results[0].reason)
       throw new Error('Failed to send customer confirmation email')
+    }
+
+    // Log restaurant notification status
+    if (results[1].status === 'rejected') {
+      console.error('Restaurant notification failed:', results[1].reason)
     }
 
     return {

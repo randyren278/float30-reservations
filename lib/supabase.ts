@@ -74,18 +74,30 @@ export const reservationService = {
 
   // Get all reservations (admin only)
   async getAllReservations(status?: string) {
-    let query = supabaseAdmin
-      .from('reservations')
-      .select('*')
-    
-    if (status) {
-      query = query.eq('status', status)
+    try {
+      console.log('Querying reservations with supabaseAdmin...', { status })
+      
+      let query = supabaseAdmin
+        .from('reservations')
+        .select('*')
+      
+      if (status && status !== 'all') {
+        query = query.eq('status', status)
+      }
+      
+      const { data, error } = await query.order('reservation_date', { ascending: false })
+      
+      if (error) {
+        console.error('Supabase error:', error)
+        throw error
+      }
+      
+      console.log(`Successfully fetched ${data?.length || 0} reservations`)
+      return data || []
+    } catch (error) {
+      console.error('getAllReservations error:', error)
+      throw error
     }
-    
-    const { data, error } = await query.order('reservation_date', { ascending: false })
-    
-    if (error) throw error
-    return data
   },
 
   // Update reservation status

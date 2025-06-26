@@ -165,6 +165,9 @@ export default function ReservationsPage() {
               <a href="#" className="text-gray-400 hover:text-white">
                 Main Website
               </a>
+              <a href="/admin" className="text-gray-400 hover:text-white">
+                Admin Console
+              </a>
             </div>
             <div className="mt-4 pt-4 border-t border-gray-800">
               <p className="text-gray-500 text-xs">
