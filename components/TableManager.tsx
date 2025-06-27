@@ -124,112 +124,138 @@ function useSyncTriggers() {
 }
 
 // Add Table Size Modal Component
-interface AddTableSizeModalProps {
-  isOpen: boolean
-  onClose: () => void
-  onAdd: (partySize: number) => void
-  existingPartySizes: number[]
-  maxPartySize: number
-}
+// Fixed AddTableSizeModal Component - Replace the existing one in TableManager.tsx
 
-function AddTableSizeModal({ isOpen, onClose, onAdd, existingPartySizes, maxPartySize }: AddTableSizeModalProps) {
-    const [selectedPartySize, setSelectedPartySize] = useState<number>(1);
+interface AddTableSizeModalProps {
+    isOpen: boolean
+    onClose: () => void
+    onAdd: (partySize: number) => void
+    existingPartySizes: number[]
+    maxPartySize: number
+  }
+  
+  function AddTableSizeModal({ isOpen, onClose, onAdd, existingPartySizes, maxPartySize }: AddTableSizeModalProps) {
+    const [selectedPartySize, setSelectedPartySize] = useState<number>(1)
   
     const availablePartySizes = Array.from({ length: maxPartySize }, (_, i) => i + 1)
-      .filter(size => !existingPartySizes.includes(size));
+      .filter(size => !existingPartySizes.includes(size))
   
     const handleAdd = () => {
       if (selectedPartySize && !existingPartySizes.includes(selectedPartySize)) {
-        onAdd(selectedPartySize);
-        onClose();
-        setSelectedPartySize(availablePartySizes[0] || 1);
+        onAdd(selectedPartySize)
+        onClose()
       }
-    };
+    }
   
+    // FIXED: Initialize selected party size when modal opens and available sizes change
     useEffect(() => {
       if (isOpen && availablePartySizes.length > 0) {
-        setSelectedPartySize(availablePartySizes[0]);
+        // Don't automatically reset to first - keep current selection if valid
+        if (!availablePartySizes.includes(selectedPartySize)) {
+          setSelectedPartySize(availablePartySizes[0])
+        }
       }
-    }, [isOpen, availablePartySizes]);
+    }, [isOpen, availablePartySizes]) // Removed selectedPartySize from dependencies to prevent reset
   
-    if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Add Table Configuration</h3>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
-          >
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
-        </div>
-
-        <div className="p-6">
-          {availablePartySizes.length === 0 ? (
-            <div className="text-center py-4">
-              <p className="text-gray-600">All party sizes up to {maxPartySize} people are already configured.</p>
-              <p className="text-sm text-gray-500 mt-2">
-                Increase the max party size in global settings to add more configurations.
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Party Size
-                </label>
-                <select
-                  value={selectedPartySize}
-                  onChange={(e) => setSelectedPartySize(parseInt(e.target.value))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  {availablePartySizes.map(size => (
-                    <option key={size} value={size}>
-                      {size} {size === 1 ? 'person' : 'people'}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                <p className="text-sm text-blue-800">
-                  <strong>Note:</strong> This will create a new table configuration for {selectedPartySize} {selectedPartySize === 1 ? 'person' : 'people'} with:
-                </p>
-                <ul className="text-sm text-blue-700 mt-1 ml-4">
-                  <li>• 1 table initially (you can change this after)</li>
-                  <li>• 1 max reservation per slot initially</li>
-                  <li>• Active status (accepting reservations)</li>
-                </ul>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="p-6 border-t border-gray-200 bg-gray-50">
-          <div className="flex space-x-3">
-            {availablePartySizes.length > 0 && (
-              <button
-                onClick={handleAdd}
-                className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Add Table Configuration
-              </button>
-            )}
+    // FIXED: Reset to first available when modal closes and reopens
+    useEffect(() => {
+      if (!isOpen) {
+        // Reset when modal closes so next time it opens fresh
+        setSelectedPartySize(1)
+      }
+    }, [isOpen])
+  
+    if (!isOpen) return null
+  
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900">Add Table Configuration</h3>
             <button
               onClick={onClose}
-              className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors"
+              className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
             >
-              {availablePartySizes.length > 0 ? 'Cancel' : 'Close'}
+              <X className="w-5 h-5 text-gray-500" />
             </button>
+          </div>
+  
+          <div className="p-6">
+            {availablePartySizes.length === 0 ? (
+              <div className="text-center py-4">
+                <p className="text-gray-600">All party sizes up to {maxPartySize} people are already configured.</p>
+                <p className="text-sm text-gray-500 mt-2">
+                  Increase the max party size in global settings to add more configurations.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Select Party Size
+                  </label>
+                  <select
+                    value={selectedPartySize}
+                    onChange={(e) => {
+                      const newValue = parseInt(e.target.value)
+                      console.log('Party size selection changed to:', newValue)
+                      setSelectedPartySize(newValue)
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    {availablePartySizes.map(size => (
+                      <option key={size} value={size}>
+                        {size} {size === 1 ? 'person' : 'people'}
+                      </option>
+                    ))}
+                  </select>
+                  
+                  {/* Debug info for development */}
+                  {process.env.NODE_ENV === 'development' && (
+                    <div className="mt-2 text-xs text-gray-500">
+                      <div>Selected: {selectedPartySize}</div>
+                      <div>Available: {availablePartySizes.join(', ')}</div>
+                      <div>Existing: {existingPartySizes.join(', ')}</div>
+                    </div>
+                  )}
+                </div>
+  
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                  <p className="text-sm text-blue-800">
+                    <strong>Note:</strong> This will create a new table configuration for {selectedPartySize} {selectedPartySize === 1 ? 'person' : 'people'} with:
+                  </p>
+                  <ul className="text-sm text-blue-700 mt-1 ml-4">
+                    <li>• 1 table initially (you can change this after)</li>
+                    <li>• 1 max reservation per slot initially</li>
+                    <li>• Active status (accepting reservations)</li>
+                  </ul>
+                </div>
+              </>
+            )}
+          </div>
+  
+          <div className="p-6 border-t border-gray-200 bg-gray-50">
+            <div className="flex space-x-3">
+              {availablePartySizes.length > 0 && (
+                <button
+                  onClick={handleAdd}
+                  className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Add Configuration for {selectedPartySize} {selectedPartySize === 1 ? 'Person' : 'People'}
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors"
+              >
+                {availablePartySizes.length > 0 ? 'Cancel' : 'Close'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  )
-}
+    )
+  }
 
 export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
   // Use the fixed hook without aggressive polling
