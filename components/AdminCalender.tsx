@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { format, addWeeks, subWeeks, startOfWeek, endOfWeek, eachDayOfInterval, parseISO, isSameDay } from 'date-fns'
 import { ChevronLeft, ChevronRight, Calendar, Clock, Users, Phone, Mail, RefreshCw } from 'lucide-react'
+import { useClosures, useGlobalSettings } from '@/hooks/useRealtimeSync'
 
 interface Reservation {
   id: string
@@ -17,16 +18,6 @@ interface Reservation {
   created_at: string
 }
 
-interface RestaurantClosure {
-  id: string
-  closure_date: string
-  closure_name: string
-  closure_reason?: string
-  all_day: boolean
-  start_time?: string
-  end_time?: string
-}
-
 interface AdminCalendarProps {
   onReservationClick?: (reservation: Reservation) => void
   onStatusUpdate?: (id: string, status: Reservation['status']) => void
@@ -36,82 +27,30 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   const [currentWeek, setCurrentWeek] = useState(new Date())
   const [timeSlots, setTimeSlots] = useState<string[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
-  const [closures, setClosures] = useState<RestaurantClosure[]>([])
-  const [slotDuration, setSlotDuration] = useState(30)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
-  // Force refresh function that completely clears cache
-  const forceRefreshClosures = useCallback(async () => {
-    console.log('🔄 Force refreshing closures...')
-    setRefreshing(true)
-    
-    try {
-      // Add multiple cache-busting parameters
-      const timestamp = new Date().getTime()
-      const random = Math.random().toString(36).substring(7)
-      const browserRandom = Math.floor(Math.random() * 1000000)
-      const url = `/api/closures?t=${timestamp}&r=${random}&br=${browserRandom}&force=true&nocache=${Date.now()}&v=${Math.random()}&admin=1`
-      
-      console.log('Fetching from URL:', url)
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-          'Last-Modified': new Date(0).toUTCString(),
-          'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
-          'If-None-Match': '*',
-          'X-Requested-With': 'XMLHttpRequest',
-          'X-Cache-Buster': timestamp.toString(),
-          'Accept': 'application/json, */*'
-        },
-        cache: 'no-store'
-      })
-      
-      console.log('Closures API response status:', response.status)
-      console.log('Response headers:', Object.fromEntries(response.headers.entries()))
-      
-      if (response.ok) {
-        const data = await response.json()
-        console.log('Fresh closures data received:', data)
-        console.log('Number of closures:', data.closures?.length || 0)
-        
-        const closuresData = data.closures || []
-        
-        // Log each closure for debugging
-        closuresData.forEach((closure: RestaurantClosure, index: number) => {
-          console.log(`Closure ${index + 1}:`, {
-            id: closure.id,
-            date: closure.closure_date,
-            name: closure.closure_name,
-            allDay: closure.all_day,
-            startTime: closure.start_time,
-            endTime: closure.end_time
-          })
-        })
-        
-        setClosures(closuresData)
-        
-        // Also force refresh reservations while we're at it
-        await fetchReservations()
-        
-        console.log('✅ Closures successfully refreshed')
-      } else {
-        console.error('Failed to fetch closures, status:', response.status)
-        const errorText = await response.text()
-        console.error('Error response:', errorText)
-      }
-    } catch (error) {
-      console.error('Force refresh closures error:', error)
-    } finally {
-      setRefreshing(false)
-    }
-  }, [])
+  // Use real-time sync hooks
+  const {
+    closures,
+    loading: closuresLoading,
+    error: closuresError
+  } = useClosures({
+    enablePolling: true,
+    pollingInterval: 5000,
+    enableEventListeners: true
+  })
 
-  // Fetch reservations directly from API
+  const {
+    settings: globalSettings,
+    slotDuration
+  } = useGlobalSettings({
+    enablePolling: true,
+    pollingInterval: 3000,
+    enableEventListeners: true
+  })
+
+  // Fetch reservations directly from API with real-time polling
   const fetchReservations = useCallback(async () => {
     try {
       const timestamp = new Date().getTime()
@@ -138,148 +77,77 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
         const data = await response.json()
         const receivedReservations = data.reservations || []
         setReservations(receivedReservations)
-        console.log(`📅 Fetched ${receivedReservations.length} reservations`)
+        console.log(`📅 AdminCalendar: Fetched ${receivedReservations.length} reservations`)
       }
     } catch (error) {
-      console.error('Calendar: Error fetching reservations:', error)
+      console.error('AdminCalendar: Error fetching reservations:', error)
     }
   }, [])
 
-  // Fetch slot duration from global settings
-  const fetchSlotDuration = useCallback(async () => {
-    try {
-      const timestamp = new Date().getTime()
-      const random = Math.random().toString(36).substring(7)
-      const browserRandom = Math.floor(Math.random() * 1000000)
-      const url = `/api/table-config?t=${timestamp}&r=${random}&br=${browserRandom}&nocache=${Date.now()}&v=${Math.random()}&admin=1`
-      
-      const response = await fetch(url, {
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-          'Last-Modified': new Date(0).toUTCString(),
-          'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
-          'If-None-Match': '*',
-          'X-Requested-With': 'XMLHttpRequest',
-          'X-Cache-Buster': timestamp.toString()
-        },
-        cache: 'no-store'
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        setSlotDuration(data.global_settings?.slot_duration || 30)
-        console.log('📏 AdminCalendar slot duration updated:', data.global_settings?.slot_duration || 30)
-      }
-    } catch (error) {
-      console.error('Error fetching slot duration:', error)
-    }
-  }, [])
-
-  // Fetch data on component mount with auto-refresh
+  // Set up real-time polling for reservations
   useEffect(() => {
-    console.log('🚀 AdminCalendar mounted, initializing data fetch...')
-    
-    const fetchAllData = async () => {
-      setLoading(true)
-      try {
-        await Promise.all([
-          fetchReservations(),
-          forceRefreshClosures(),
-          fetchSlotDuration()
-        ])
-      } finally {
-        setLoading(false)
-      }
-    }
+    console.log('🚀 AdminCalendar: Setting up real-time reservation polling')
     
     // Fetch immediately
-    fetchAllData()
+    fetchReservations()
     
-    // Set up periodic refresh every 30 seconds for real-time updates
-    const refreshInterval = setInterval(() => {
-      console.log('⏰ Periodic refresh triggered')
-      fetchAllData()
-    }, 30000)
+    // Set up polling every 5 seconds for real-time updates
+    const reservationPolling = setInterval(() => {
+      fetchReservations()
+    }, 5000)
     
-    // Cleanup interval on unmount
     return () => {
-      console.log('🧹 Cleaning up AdminCalendar intervals')
-      clearInterval(refreshInterval)
+      console.log('🧹 AdminCalendar: Cleaning up reservation polling')
+      clearInterval(reservationPolling)
     }
-  }, [fetchReservations, forceRefreshClosures, fetchSlotDuration])
+  }, [fetchReservations])
 
-  // Listen for custom refresh events from other components
+  // Listen for manual refresh events
   useEffect(() => {
-    const handleClosureUpdate = () => {
-      console.log('📡 Received closure update event, refreshing...')
-      forceRefreshClosures()
-    }
-
-    // Listen for custom events
-    window.addEventListener('closureUpdated', handleClosureUpdate)
-    window.addEventListener('closureDeleted', handleClosureUpdate)
-    window.addEventListener('closureCreated', handleClosureUpdate)
-    
-    // Production-ready configuration polling
-    let configPollingInterval: NodeJS.Timeout
-    let lastSlotDuration = slotDuration
-    
-    const pollSlotDurationChanges = async () => {
-      try {
-        const timestamp = Date.now()
-        const response = await fetch(`/api/table-config?checksum=true&t=${timestamp}&r=${Math.random()}`, {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-            'Pragma': 'no-cache',
-            'X-Force-Refresh': 'true'
-          },
-          cache: 'no-store'
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          const currentSlotDuration = data.global_settings?.slot_duration || 30
-          
-          if (lastSlotDuration !== currentSlotDuration) {
-            console.log('🕒 AdminCalendar: Slot duration changed in production:', lastSlotDuration, '->', currentSlotDuration)
-            setSlotDuration(currentSlotDuration)
-            lastSlotDuration = currentSlotDuration
-          }
-        }
-      } catch (error) {
-        console.error('Error polling slot duration changes:', error)
-      }
+    const handleGlobalRefresh = () => {
+      console.log('📡 AdminCalendar: Received global refresh event')
+      fetchReservations()
     }
     
-    // Poll every 3 seconds for production
-    configPollingInterval = setInterval(pollSlotDurationChanges, 3000)
-    
-    // Listen for table config updates (which might change slot duration)
-    const handleTableConfigUpdate = (event: CustomEvent) => {
-      console.log('📡 AdminCalendar: Received table config update event, refreshing slot duration...')
-      fetchSlotDuration()
-      
-      if (event.detail && event.detail.slotDuration) {
-        setSlotDuration(event.detail.slotDuration)
-      }
+    const handleReservationUpdate = () => {
+      console.log('📡 AdminCalendar: Received reservation update event')
+      fetchReservations()
     }
     
-    window.addEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
-
+    // Listen to various update events
+    window.addEventListener('globalRefresh', handleGlobalRefresh)
+    window.addEventListener('reservationUpdated', handleReservationUpdate)
+    window.addEventListener('reservationCreated', handleReservationUpdate)
+    window.addEventListener('reservationStatusChanged', handleReservationUpdate)
+    
     return () => {
-      if (configPollingInterval) {
-        clearInterval(configPollingInterval)
-      }
-      window.removeEventListener('closureUpdated', handleClosureUpdate)
-      window.removeEventListener('closureDeleted', handleClosureUpdate) 
-      window.removeEventListener('closureCreated', handleClosureUpdate)
-      window.removeEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
+      window.removeEventListener('globalRefresh', handleGlobalRefresh)
+      window.removeEventListener('reservationUpdated', handleReservationUpdate)
+      window.removeEventListener('reservationCreated', handleReservationUpdate)
+      window.removeEventListener('reservationStatusChanged', handleReservationUpdate)
     }
-  }, [forceRefreshClosures, fetchSlotDuration])
+  }, [fetchReservations])
 
-  // Generate time slots based on day of week
+  // Generate time slots based on slot duration (with real-time updates)
+  useEffect(() => {
+    console.log(`🕒 AdminCalendar: Updating time slots with ${slotDuration}min duration`)
+    
+    const slots = []
+    const startHour = 10 // 10 AM
+    const endHour = 21   // 9 PM
+    
+    for (let hour = startHour; hour < endHour; hour++) {
+      for (let minute = 0; minute < 60; minute += slotDuration) {
+        const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+        slots.push(timeString)
+      }
+    }
+    
+    setTimeSlots(slots)
+    console.log(`📏 AdminCalendar: Generated ${slots.length} time slots`)
+  }, [slotDuration])
+
+  // Generate time slots for a specific day based on day of week
   const getTimeSlotsForDay = (dayOfWeek: number) => {
     let startHour, endHour
     
@@ -315,22 +183,6 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     
     return slots
   }
-
-  // Generate master time slots (10 AM to 9 PM for calendar display)
-  useEffect(() => {
-    const slots = []
-    const startHour = 10 // 10 AM
-    const endHour = 21   // 9 PM
-    
-    for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += slotDuration) {
-        const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
-        slots.push(timeString)
-      }
-    }
-    
-    setTimeSlots(slots)
-  }, [slotDuration])
 
   // Get the week range
   const weekStart = startOfWeek(currentWeek, { weekStartsOn: 1 }) // Monday start
@@ -448,13 +300,10 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
 
   // Manual refresh button handler
   const handleManualRefresh = async () => {
-    console.log('🔄 Manual refresh triggered')
+    console.log('🔄 AdminCalendar: Manual refresh triggered')
     setLoading(true)
     try {
-      await Promise.all([
-        fetchReservations(),
-        forceRefreshClosures()
-      ])
+      await fetchReservations()
     } finally {
       setLoading(false)
     }
@@ -463,11 +312,20 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   return (
     <div className="bg-white rounded-lg shadow-lg">
       {/* Loading Indicator */}
-      {(loading || refreshing) && (
+      {(loading || refreshing || closuresLoading) && (
         <div className="p-4 bg-blue-50 border border-blue-200 rounded-t-lg">
           <div className="text-blue-800 text-sm flex items-center">
-            <RefreshCw className={`w-4 h-4 mr-2 ${(loading || refreshing) ? 'animate-spin' : ''}`} />
-            {refreshing ? 'Refreshing closures...' : 'Loading reservations...'}
+            <RefreshCw className={`w-4 h-4 mr-2 ${(loading || refreshing || closuresLoading) ? 'animate-spin' : ''}`} />
+            {closuresLoading ? 'Syncing closures...' : 'Loading reservations...'}
+          </div>
+        </div>
+      )}
+
+      {/* Error Display */}
+      {closuresError && (
+        <div className="p-4 bg-red-50 border border-red-200">
+          <div className="text-red-800 text-sm">
+            <strong>Sync Error:</strong> {closuresError}
           </div>
         </div>
       )}
@@ -476,7 +334,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
       {process.env.NODE_ENV === 'development' && (
         <div className="p-4 bg-yellow-50 border border-yellow-200">
           <div className="text-sm text-yellow-800">
-            <strong>🐛 Debug:</strong> {closures.length} closures loaded
+            <strong>🐛 Real-time Status:</strong> {closures.length} closures loaded, slot duration: {slotDuration}min
             {closures.length > 0 && (
               <div className="mt-1 space-y-1">
                 <div><strong>Closure dates:</strong> {closures.map(c => c.closure_date).join(', ')}</div>
@@ -542,7 +400,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
             {format(weekStart, 'MMM d')} - {format(weekEnd, 'MMM d, yyyy')}
           </h3>
           <p className="text-sm text-gray-600 mt-1">
-            Week of {format(weekStart, 'EEEE, MMMM d')}
+            Week of {format(weekStart, 'EEEE, MMMM d')} | Slot Duration: {slotDuration} minutes
           </p>
         </div>
       </div>
@@ -787,6 +645,18 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
             </div>
           </div>
         )}
+
+        {/* Real-time status indicator */}
+        <div className="mt-4 pt-4 border-t border-blue-300">
+          <div className="text-xs text-blue-700">
+            <strong>Real-time Status:</strong> 
+            <span className="ml-2">
+              Polling active • Last update: {new Date().toLocaleTimeString()} • 
+              Slot duration: {slotDuration}min • 
+              {closures.length} closures loaded
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   )

@@ -36,11 +36,14 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
   const [reservationDetails, setReservationDetails] = useState<any>(null)
   const [closures, setClosures] = useState<Closure[]>([])
   const [tableConfigs, setTableConfigs] = useState<TableConfiguration[]>([])
-  const [maxPartySize, setMaxPartySize] = useState(10)
-  const [slotDuration, setSlotDuration] = useState(30)
+  const [globalSettings, setGlobalSettings] = useState({
+    max_party_size: 10,
+    slot_duration: 30,
+    advance_booking_days: 30
+  })
   const [availableTimeSlots, setAvailableTimeSlots] = useState<{value: string, label: string}[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const [loading, setLoading] = useState(false) // Start as false!
+  const [dataLoaded, setDataLoaded] = useState(false)
 
   const {
     register,
@@ -57,276 +60,152 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     }
   })
 
-  // Force refresh function for table configurations
-  const forceRefreshTableConfigs = useCallback(async () => {
-    console.log('🔄 ReservationForm: Force refreshing table configurations...')
-    setRefreshing(true)
-    
-    try {
-      const timestamp = new Date().getTime()
-      const random = Math.random().toString(36).substring(7)
-      const browserRandom = Math.floor(Math.random() * 1000000)
-      const url = `/api/table-config?t=${timestamp}&r=${random}&br=${browserRandom}&force=true&nocache=${Date.now()}&v=${Math.random()}`
-      
-      console.log('Fetching table configs from:', url)
-      
-      const configResponse = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-          'Last-Modified': new Date(0).toUTCString(),
-          'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
-          'If-None-Match': '*',
-          'X-Requested-With': 'XMLHttpRequest',
-          'X-Cache-Buster': timestamp.toString(),
-          'Accept': 'application/json, */*'
-        },
-        cache: 'no-store'
-      })
-      
-      console.log('Table config API response status:', configResponse.status)
-      
-      if (configResponse.ok) {
-        const configData = await configResponse.json()
-        console.log('Fresh table config data received:', configData)
-        
-        const activeConfigs = configData.table_configs?.filter((c: TableConfiguration) => c.is_active) || []
-        setTableConfigs(activeConfigs)
-        setMaxPartySize(configData.global_settings?.max_party_size || 10)
-        setSlotDuration(configData.global_settings?.slot_duration || 30)
-        
-        console.log(`✅ Updated table configs: ${activeConfigs.length} active configurations`)
-        
-        // Update default party size if needed
-        const availablePartySizes = activeConfigs
-          .map((c: TableConfiguration) => c.party_size)
-          .sort((a: number, b: number) => a - b)
-        
-        if (availablePartySizes.length > 0) {
-          const currentPartySize = watch('party_size')
-          if (!availablePartySizes.includes(currentPartySize)) {
-            setValue('party_size', availablePartySizes[0])
-            console.log(`Updated default party size to ${availablePartySizes[0]}`)
-          }
-        }
-        
-      } else {
-        console.error('Failed to fetch table configs:', configResponse.status)
-      }
-    } catch (error) {
-      console.error('❌ Error refreshing table configs:', error)
-    } finally {
-      setRefreshing(false)
-    }
-  }, [setValue, watch])
-
-  // Fetch table configurations and closures
+  // Simple data fetching function
   const fetchData = useCallback(async () => {
-    console.log('🚀 ReservationForm: Fetching initial data...')
+    console.log('🔄 ReservationForm: Fetching data...')
     setLoading(true)
     
     try {
-        // Fetch closures
-        const timestamp = new Date().getTime()
-        const random = Math.random().toString(36).substring(7)
-        const browserRandom = Math.floor(Math.random() * 1000000)
-        const closuresResponse = await fetch(`/api/closures?t=${timestamp}&r=${random}&br=${browserRandom}&nocache=${Date.now()}&v=${Math.random()}`, {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
-            'Pragma': 'no-cache',
-            'Expires': '0',
-            'Last-Modified': new Date(0).toUTCString(),
-            'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
-            'If-None-Match': '*',
-            'X-Requested-With': 'XMLHttpRequest',
-            'X-Cache-Buster': timestamp.toString()
-          },
-          cache: 'no-store'
+      // Fetch both APIs in parallel
+      const [configResponse, closuresResponse] = await Promise.all([
+        fetch('/api/table-config', {
+          headers: { 'Cache-Control': 'no-cache' }
+        }),
+        fetch('/api/closures', {
+          headers: { 'Cache-Control': 'no-cache' }
         })
+      ])
       
+      // Process table configurations
+      if (configResponse.ok) {
+        const configData = await configResponse.json()
+        const activeConfigs = configData.table_configs?.filter((c: any) => c.is_active) || []
+        setTableConfigs(activeConfigs)
+        setGlobalSettings(configData.global_settings || globalSettings)
+        
+        console.log(`✅ Loaded ${activeConfigs.length} table configurations`)
+        console.log('⚙️ Global settings:', configData.global_settings)
+      } else {
+        console.error('❌ Failed to fetch table configs:', configResponse.status)
+        // Set defaults so the form still works
+        setTableConfigs([
+          { party_size: 1, table_count: 2, max_reservations_per_slot: 2, is_active: true },
+          { party_size: 2, table_count: 6, max_reservations_per_slot: 3, is_active: true },
+          { party_size: 4, table_count: 4, max_reservations_per_slot: 2, is_active: true },
+          { party_size: 6, table_count: 2, max_reservations_per_slot: 1, is_active: true },
+          { party_size: 8, table_count: 1, max_reservations_per_slot: 1, is_active: true }
+        ])
+      }
+      
+      // Process closures
       if (closuresResponse.ok) {
         const closuresData = await closuresResponse.json()
         setClosures(closuresData.closures || [])
-        console.log(`📅 Loaded ${closuresData.closures?.length || 0} closures`)
+        console.log(`✅ Loaded ${closuresData.closures?.length || 0} closures`)
+      } else {
+        console.error('❌ Failed to fetch closures:', closuresResponse.status)
+        setClosures([]) // Empty array is fine
       }
-
-      // Fetch table configurations
-      await forceRefreshTableConfigs()
+      
+      setDataLoaded(true)
       
     } catch (error) {
       console.error('❌ Error fetching data:', error)
-      toast.error('Error loading configuration data')
+      // Set defaults so the form still works
+      setTableConfigs([
+        { party_size: 1, table_count: 2, max_reservations_per_slot: 2, is_active: true },
+        { party_size: 2, table_count: 6, max_reservations_per_slot: 3, is_active: true },
+        { party_size: 4, table_count: 4, max_reservations_per_slot: 2, is_active: true },
+        { party_size: 6, table_count: 2, max_reservations_per_slot: 1, is_active: true },
+        { party_size: 8, table_count: 1, max_reservations_per_slot: 1, is_active: true }
+      ])
+      setClosures([])
+      setDataLoaded(true) // Still mark as loaded so form shows
     } finally {
       setLoading(false)
+      console.log('🏁 Data fetching completed')
     }
-  }, [forceRefreshTableConfigs])
+  }, [globalSettings])
 
-  // Initial data fetch
+  // Fetch data on mount - only once
   useEffect(() => {
-    fetchData()
-  }, [fetchData])
+    if (!dataLoaded) {
+      fetchData()
+    }
+  }, [fetchData, dataLoaded])
 
-  // Production-ready polling for configuration changes
+  // Set up polling for real-time updates (but don't block initial load)
   useEffect(() => {
-    let configPollingInterval: NodeJS.Timeout
-    let lastConfigChecksum = ''
+    if (!dataLoaded) return // Wait for initial load
     
-    const pollConfigurationChanges = async () => {
-      try {
-        // Use a lightweight checksum endpoint or timestamp approach
-        const timestamp = Date.now()
-        const response = await fetch(`/api/table-config?checksum=true&t=${timestamp}&r=${Math.random()}`, {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-            'Pragma': 'no-cache',
-            'X-Force-Refresh': 'true'
-          },
-          cache: 'no-store'
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          const currentChecksum = JSON.stringify({
-            slotDuration: data.global_settings?.slot_duration,
-            configs: data.table_configs?.map((c: any) => ({id: c.party_size, active: c.is_active})),
-            timestamp: data.timestamp
-          })
-          
-          if (lastConfigChecksum && lastConfigChecksum !== currentChecksum) {
-            console.log('🔄 ReservationForm: Configuration changed in production, refreshing...')
-            await forceRefreshTableConfigs()
-            
-            // Update slot duration immediately
-            if (data.global_settings?.slot_duration) {
-              setSlotDuration(data.global_settings.slot_duration)
-            }
-          }
-          
-          lastConfigChecksum = currentChecksum
-        }
-      } catch (error) {
-        console.error('Error polling configuration changes:', error)
-      }
-    }
+    console.log('⏰ Setting up polling for updates...')
     
-    // Initial check
-    pollConfigurationChanges()
+    const interval = setInterval(() => {
+      console.log('⏰ Polling for updates...')
+      fetchData()
+    }, 10000) // Poll every 10 seconds
     
-    // Poll every 3 seconds in production for real-time updates
-    configPollingInterval = setInterval(pollConfigurationChanges, 3000)
-    
-    // Also listen for events (for development and immediate updates)
-    const handleTableConfigUpdate = (event: CustomEvent) => {
-      console.log('📡 ReservationForm: Received table config update event:', event.detail)
-      forceRefreshTableConfigs()
-      
-      if (event.detail && event.detail.slotDuration) {
-        console.log('🕒 ReservationForm: Updating slot duration to:', event.detail.slotDuration)
-        setSlotDuration(event.detail.slotDuration)
-      }
-    }
-
-    const handleSlotDurationChange = (event: CustomEvent) => {
-      console.log('🕒 ReservationForm: Received slot duration change event:', event.detail)
-      if (event.detail && event.detail.newDuration) {
-        setSlotDuration(event.detail.newDuration)
-      }
-    }
-
-    window.addEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
-    window.addEventListener('slotDurationChanged', handleSlotDurationChange as EventListener)
-
     return () => {
-      if (configPollingInterval) {
-        clearInterval(configPollingInterval)
-      }
-      window.removeEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
-      window.removeEventListener('slotDurationChanged', handleSlotDurationChange as EventListener)
+      clearInterval(interval)
+      console.log('🧹 Cleaned up polling interval')
     }
-  }, [forceRefreshTableConfigs])
+  }, [dataLoaded, fetchData])
 
   const selectedDate = watch('reservation_date')
   const selectedTime = watch('reservation_time')
 
   // Get available party sizes from table configurations
   const getAvailablePartySizes = () => {
-    const sizes = tableConfigs
+    return tableConfigs
       .filter(config => config.is_active)
       .map(config => config.party_size)
       .sort((a, b) => a - b)
-    
-    console.log('Available party sizes:', sizes)
-    return sizes
   }
+
+  // Update default party size when table configs change
+  useEffect(() => {
+    const availablePartySizes = getAvailablePartySizes()
+    if (availablePartySizes.length > 0) {
+      const currentPartySize = watch('party_size')
+      if (!availablePartySizes.includes(currentPartySize)) {
+        setValue('party_size', availablePartySizes[0])
+        console.log(`🔄 Updated default party size to ${availablePartySizes[0]}`)
+      }
+    }
+  }, [tableConfigs, setValue, watch])
 
   // Generate available dates (only exclude full-day closures)
   const getAvailableDates = () => {
     const dates = []
     const today = new Date()
     
-    console.log('ReservationForm: Generating available dates, closures:', closures.length)
-    
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < globalSettings.advance_booking_days; i++) {
       const date = addDays(today, i)
       const dateString = format(date, 'yyyy-MM-dd')
       
       // Check if this date has an all-day closure
-      const allDayClosure = closures.find(c => {
-        const matches = c.closure_date === dateString && c.all_day === true
-        if (matches) {
-          console.log(`ReservationForm: Found all-day closure for ${dateString}:`, c.closure_name)
-        }
-        return matches
-      })
+      const allDayClosure = closures.find(c => 
+        c.closure_date === dateString && c.all_day === true
+      )
       
-      // Only skip dates with all-day closures
       if (!allDayClosure) {
         dates.push({
           value: dateString,
           label: format(date, 'EEEE, MMMM do'),
           isToday: i === 0
         })
-      } else {
-        console.log(`ReservationForm: Skipping date ${dateString} due to all-day closure:`, allDayClosure.closure_name)
       }
     }
     
-    console.log(`ReservationForm: Generated ${dates.length} available dates`)
     return dates
   }
 
-  // Check if a specific time slot is during a partial closure
-  const isTimeSlotBlocked = (date: string, time: string) => {
-    const dayClosures = closures.filter(c => c.closure_date === date)
-    
-    for (const closure of dayClosures) {
-      // Skip all-day closures (already handled in date filtering)
-      if (closure.all_day) continue
-      
-      // Check if time falls within partial closure
-      if (closure.start_time && closure.end_time) {
-        if (time >= closure.start_time && time <= closure.end_time) {
-          console.log('ReservationForm: Time slot blocked by partial closure:', { 
-            date, 
-            time, 
-            closure: closure.closure_name 
-          })
-          return true
-        }
-      }
-    }
-    
-    return false
-  }
-
-  // Generate available time slots based on day of week - now using useCallback for proper memoization
+  // Generate available time slots based on day of week
   const generateTimeSlots = useCallback((date: string, duration: number) => {
     if (!date) return []
     
     const parsedDate = parseISO(date)
-    const dayOfWeek = parsedDate.getDay() // 0 = Sunday, 1 = Monday, etc.
+    const dayOfWeek = parsedDate.getDay()
     
     let startHour, endHour
     
@@ -362,17 +241,10 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
         let isBlocked = false
         
         for (const closure of dayClosures) {
-          // Skip all-day closures (already handled in date filtering)
           if (closure.all_day) continue
           
-          // Check if time falls within partial closure
           if (closure.start_time && closure.end_time) {
             if (timeString >= closure.start_time && timeString <= closure.end_time) {
-              console.log('ReservationForm: Time slot blocked by partial closure:', { 
-                date, 
-                time: timeString, 
-                closure: closure.closure_name 
-              })
               isBlocked = true
               break
             }
@@ -390,19 +262,14 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       }
     }
     
-    console.log(`ReservationForm: Generated ${slots.length} time slots for ${date} with ${duration}min duration`)
     return slots
   }, [closures])
 
   // Update time slots whenever date or slot duration changes
   useEffect(() => {
-    console.log('🕒 ReservationForm: Regenerating time slots due to date/duration change', {
-      selectedDate,
-      slotDuration
-    })
-    const newSlots = generateTimeSlots(selectedDate, slotDuration)
+    const newSlots = generateTimeSlots(selectedDate, globalSettings.slot_duration)
     setAvailableTimeSlots(newSlots)
-  }, [selectedDate, slotDuration, generateTimeSlots])
+  }, [selectedDate, globalSettings.slot_duration, generateTimeSlots])
 
   const onSubmit = async (data: ReservationFormData) => {
     setIsSubmitting(true)
@@ -511,18 +378,20 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     )
   }
 
-  const availablePartySizes = getAvailablePartySizes()
-
-  if (loading) {
+  // Show loading only if we haven't loaded data yet AND we're currently loading
+  if (!dataLoaded && loading) {
     return (
       <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
         <div className="text-center">
           <RefreshCw className="w-8 h-8 text-blue-600 mx-auto mb-4 animate-spin" />
           <div className="text-gray-600">Loading reservation system...</div>
+          <div className="text-sm text-gray-500 mt-2">This should only take a moment</div>
         </div>
       </div>
     )
   }
+
+  const availablePartySizes = getAvailablePartySizes()
 
   return (
     <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
@@ -530,10 +399,10 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
         <h2 className="text-2xl font-bold text-gray-900 mb-2">Make a Reservation</h2>
         <p className="text-gray-600">Float 30 Restaurant</p>
         
-        {refreshing && (
+        {loading && (
           <div className="mt-2 flex items-center justify-center text-blue-600">
             <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-            <span className="text-sm">Updating configurations...</span>
+            <span className="text-sm">Updating configuration...</span>
           </div>
         )}
       </div>
@@ -541,14 +410,14 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       {/* Debug info for development */}
       {process.env.NODE_ENV === 'development' && (
         <div className="mb-4 p-3 bg-gray-100 rounded text-sm">
-          <strong>🐛 Debug:</strong> {closures.length} closures, {tableConfigs.length} table configs
-          {availablePartySizes.length > 0 && (
-            <div className="mt-1">
-              <strong>Available party sizes:</strong> {availablePartySizes.join(', ')}
-            </div>
-          )}
-          <div className="mt-1">
-            <strong>Max party size:</strong> {maxPartySize}
+          <strong>🐛 Status:</strong>
+          <div className="mt-1 space-y-1">
+            <div><strong>Data loaded:</strong> {dataLoaded ? 'Yes' : 'No'}</div>
+            <div><strong>Loading:</strong> {loading ? 'Yes' : 'No'}</div>
+            <div><strong>Closures:</strong> {closures.length} loaded</div>
+            <div><strong>Table configs:</strong> {tableConfigs.length} active</div>
+            <div><strong>Available party sizes:</strong> {availablePartySizes.join(', ') || 'None'}</div>
+            <div><strong>Slot duration:</strong> {globalSettings.slot_duration} minutes</div>
           </div>
         </div>
       )}
@@ -560,7 +429,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
             <strong>⚠️ No tables currently available for booking.</strong>
             <p className="mt-1">Please contact the restaurant directly to make a reservation.</p>
             <button
-              onClick={() => forceRefreshTableConfigs()}
+              onClick={() => fetchData()}
               className="mt-2 text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded transition-colors"
             >
               Refresh Configuration
@@ -589,12 +458,6 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           </select>
           {errors.reservation_date && (
             <p className="text-red-500 text-sm mt-1">{errors.reservation_date.message}</p>
-          )}
-          {/* Show closure info for selected date */}
-          {selectedDate && closures.some(c => c.closure_date === selectedDate && !c.all_day) && (
-            <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
-              <strong>Note:</strong> Some time slots may be unavailable due to partial closure.
-            </div>
           )}
         </div>
 
@@ -652,11 +515,6 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           </select>
           {errors.party_size && (
             <p className="text-red-500 text-sm mt-1">{errors.party_size.message}</p>
-          )}
-          {availablePartySizes.length === 0 && (
-            <p className="text-red-500 text-sm mt-1">
-              No table configurations are currently active. Please contact the restaurant.
-            </p>
           )}
         </div>
 
@@ -743,7 +601,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           <h4 className="font-medium text-gray-900 mb-2">Important Information</h4>
           <ul className="text-sm text-gray-600 space-y-1">
             <li>• Please arrive on time - tables may be released after 15 minutes</li>
-            <li>• Reservations can be made up to 30 days in advance</li>
+            <li>• Reservations can be made up to {globalSettings.advance_booking_days} days in advance</li>
             <li>• We're open 7 days a week with varying hours</li>
             <li>• Mon-Tue: 10am-4pm | Wed-Thu & Sun: 10am-8pm | Fri-Sat: 10am-9pm</li>
             {availablePartySizes.length > 0 ? (
@@ -761,10 +619,11 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           <button
             type="button"
             onClick={() => fetchData()}
-            disabled={loading || refreshing}
-            className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+            disabled={loading}
+            className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50 flex items-center justify-center mx-auto"
           >
-            {loading || refreshing ? 'Refreshing...' : 'Refresh Configuration'}
+            <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Refreshing...' : 'Refresh Configuration'}
           </button>
         </div>
       </form>

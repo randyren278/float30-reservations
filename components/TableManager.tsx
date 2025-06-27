@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Users, Settings, Save, RotateCcw, Plus, Minus, X, AlertCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useTableConfigs, useSyncTriggers } from '@/hooks/useRealtimeSync'
 
 interface TableConfiguration {
   id?: string
@@ -54,7 +55,7 @@ function AddTableSizeModal({ isOpen, onClose, onAdd, existingPartySizes, maxPart
       }
     }, [isOpen, availablePartySizes]);
   
-    if (!isOpen) return null; // Move the early return after hooks
+    if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -134,6 +135,22 @@ function AddTableSizeModal({ isOpen, onClose, onAdd, existingPartySizes, maxPart
 }
 
 export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
+  // Use real-time sync hooks
+  const {
+    tableConfigs: liveTableConfigs,
+    globalSettings: liveGlobalSettings,
+    loading,
+    error,
+    refresh
+  } = useTableConfigs({
+    enablePolling: true,
+    pollingInterval: 3000,
+    enableEventListeners: true
+  })
+
+  const { triggerTableConfigUpdate, triggerGlobalRefresh } = useSyncTriggers()
+
+  // Local state for editing
   const [tableConfigs, setTableConfigs] = useState<TableConfiguration[]>([])
   const [originalTableConfigs, setOriginalTableConfigs] = useState<TableConfiguration[]>([])
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({
@@ -146,59 +163,41 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
     slot_duration: 30,
     advance_booking_days: 30
   })
-  const [loading, setLoading] = useState(false)
+  
   const [saving, setSaving] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+
+  // Sync live data with local state
+  useEffect(() => {
+    if (liveTableConfigs.length > 0) {
+      const configs = liveTableConfigs.map(config => ({
+        ...config,
+        id: config.id || undefined
+      }))
+      setTableConfigs(configs)
+      setOriginalTableConfigs(JSON.parse(JSON.stringify(configs)))
+      console.log('📊 TableManager: Synced table configs from real-time data:', configs.length)
+    }
+  }, [liveTableConfigs])
+
+  useEffect(() => {
+    setGlobalSettings(liveGlobalSettings)
+    setOriginalGlobalSettings(JSON.parse(JSON.stringify(liveGlobalSettings)))
+    console.log('⚙️ TableManager: Synced global settings from real-time data:', liveGlobalSettings)
+  }, [liveGlobalSettings])
 
   // Check if there are unsaved changes
   useEffect(() => {
     const configsChanged = JSON.stringify(tableConfigs) !== JSON.stringify(originalTableConfigs)
     const settingsChanged = JSON.stringify(globalSettings) !== JSON.stringify(originalGlobalSettings)
-    setHasUnsavedChanges(configsChanged || settingsChanged)
-  }, [tableConfigs, globalSettings, originalTableConfigs, originalGlobalSettings])
-
-  // Fetch current table configurations
-  const fetchTableConfigs = async () => {
-    setLoading(true)
-    try {
-      console.log('🔄 Fetching table configurations...')
-      
-      const response = await fetch('/api/admin/table-config', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`,
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
-        },
-        cache: 'no-store'
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        const configs = data.table_configs || []
-        const settings = data.global_settings || globalSettings
-        
-        setTableConfigs(configs)
-        setOriginalTableConfigs(JSON.parse(JSON.stringify(configs))) // Deep copy
-        setGlobalSettings(settings)
-        setOriginalGlobalSettings(JSON.parse(JSON.stringify(settings))) // Deep copy
-        
-        console.log('✅ Table configurations loaded:', configs.length)
-      } else {
-        console.error('❌ Failed to fetch table configs:', response.status)
-        toast.error('Failed to load table configurations')
-      }
-    } catch (error) {
-      console.error('❌ Error fetching table configs:', error)
-      toast.error('Error loading table configurations')
-    } finally {
-      setLoading(false)
+    const newHasUnsavedChanges = configsChanged || settingsChanged
+    
+    if (newHasUnsavedChanges !== hasUnsavedChanges) {
+      console.log('🔄 TableManager: Unsaved changes state changed:', newHasUnsavedChanges)
+      setHasUnsavedChanges(newHasUnsavedChanges)
     }
-  }
-
-  useEffect(() => {
-    fetchTableConfigs()
-  }, [])
+  }, [tableConfigs, globalSettings, originalTableConfigs, originalGlobalSettings, hasUnsavedChanges])
 
   // Update table configuration
   const updateTableConfig = (partySize: number, field: keyof TableConfiguration, value: any) => {
@@ -237,7 +236,7 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
     }
   }
 
-  // Save all configurations
+  // Save all configurations with real-time broadcasting
   const saveConfigurations = async () => {
     if (tableConfigs.length === 0) {
       toast.error('Must have at least one table configuration')
@@ -258,7 +257,7 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
 
     setSaving(true)
     try {
-      console.log('💾 Saving table configurations...', {
+      console.log('💾 TableManager: Saving configurations...', {
         configCount: tableConfigs.length,
         globalSettings
       })
@@ -277,36 +276,32 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
 
       if (response.ok) {
         const result = await response.json()
-        console.log('✅ Table configurations saved successfully:', result)
+        console.log('✅ TableManager: Configurations saved successfully:', result)
         toast.success('Table configurations saved successfully')
         
-        // Refresh data to get server state and reset change tracking
-        await fetchTableConfigs()
+        // Update the "original" state to mark as saved
+        setOriginalTableConfigs(JSON.parse(JSON.stringify(tableConfigs)))
+        setOriginalGlobalSettings(JSON.parse(JSON.stringify(globalSettings)))
         
-        // Trigger global refresh to update other components
+        // Trigger real-time sync update
+        triggerTableConfigUpdate({
+          configurations: tableConfigs,
+          settings: globalSettings,
+          timestamp: Date.now(),
+          slotDuration: globalSettings.slot_duration
+        })
+        
+        // Also trigger global refresh
+        triggerGlobalRefresh()
+        
+        // Refresh from server to get latest state
+        await refresh()
+        
+        // Call legacy callback for backward compatibility
         if (onSettingsUpdate) {
-          console.log('📡 Triggering settings update callback')
+          console.log('📞 TableManager: Calling legacy onSettingsUpdate callback')
           onSettingsUpdate()
         }
-
-        // Broadcast event to other components with more specific data
-        console.log('📡 Broadcasting tableConfigUpdated event with new settings:', globalSettings)
-        window.dispatchEvent(new CustomEvent('tableConfigUpdated', {
-          detail: { 
-            configurations: tableConfigs, 
-            settings: globalSettings,
-            timestamp: Date.now(),
-            slotDuration: globalSettings.slot_duration
-          }
-        }))
-        
-        // Also broadcast a specific slot duration change event
-        window.dispatchEvent(new CustomEvent('slotDurationChanged', {
-          detail: { 
-            newDuration: globalSettings.slot_duration,
-            timestamp: Date.now()
-          }
-        }))
         
       } else {
         const errorData = await response.json()
@@ -330,7 +325,7 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
     }
   }
 
-  // Reset to defaults
+  // Reset to defaults - FIXED: Force unsaved changes state
   const resetToDefaults = () => {
     if (confirm('Reset all table configurations to defaults? This will lose all current settings.')) {
       const defaultConfigs: TableConfiguration[] = [
@@ -341,17 +336,26 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
         { party_size: 8, table_count: 1, max_reservations_per_slot: 1, is_active: true }
       ]
       
-      setTableConfigs(defaultConfigs)
-      setGlobalSettings({
+      const defaultGlobalSettings = {
         max_party_size: 10,
         slot_duration: 30,
         advance_booking_days: 30
-      })
-      toast('Reset to default configurations')
+      }
+      
+      setTableConfigs(defaultConfigs)
+      setGlobalSettings(defaultGlobalSettings)
+      
+      // Force the unsaved changes detection to trigger
+      setTimeout(() => {
+        console.log('🔄 TableManager: Forcing unsaved changes detection after defaults')
+        setHasUnsavedChanges(true)
+      }, 100)
+      
+      toast('Reset to default configurations - Remember to save!')
     }
   }
 
-  if (loading) {
+  if (loading && tableConfigs.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-lg p-6">
         <div className="text-center">
@@ -372,6 +376,24 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
         maxPartySize={globalSettings.max_party_size}
       />
 
+      {/* Error Display */}
+      {error && (
+        <div className="p-4 bg-red-50 border-b border-red-200">
+          <div className="flex items-center">
+            <AlertCircle className="w-5 h-5 text-red-600 mr-2" />
+            <div className="text-red-800">
+              <strong>Sync Error:</strong> {error}
+              <button
+                onClick={refresh}
+                className="ml-3 text-sm underline hover:no-underline"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Unsaved Changes Warning */}
       {hasUnsavedChanges && (
         <div className="p-4 bg-yellow-50 border-b border-yellow-200">
@@ -380,6 +402,20 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
             <div className="text-yellow-800">
               <strong>You have unsaved changes.</strong> Remember to save your configurations to apply them to the reservation system.
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Real-time Status */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="p-4 bg-blue-50 border-b border-blue-200">
+          <div className="text-sm text-blue-800">
+            <strong>🔄 Real-time Status:</strong> 
+            {loading ? ' Syncing...' : ' Connected'} | 
+            Live configs: {liveTableConfigs.length} | 
+            Local configs: {tableConfigs.length} |
+            Slot duration: {liveGlobalSettings.slot_duration}min |
+            <strong> Has unsaved changes: {hasUnsavedChanges ? 'YES' : 'NO'}</strong>
           </div>
         </div>
       )}
@@ -417,7 +453,11 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
             <button
               onClick={saveConfigurations}
               disabled={saving || !hasUnsavedChanges}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+                hasUnsavedChanges 
+                  ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
             >
               <Save className="w-4 h-4 mr-2" />
               {saving ? 'Saving...' : hasUnsavedChanges ? 'Save Changes' : 'Saved'}
@@ -465,6 +505,9 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
               <option value={30}>30 minutes</option>
               <option value={60}>60 minutes</option>
             </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Current: {liveGlobalSettings.slot_duration}min (live)
+            </p>
           </div>
           
           <div>
@@ -680,7 +723,32 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
                 <span className="text-red-600 ml-2">No party sizes available for booking</span>
               )}
             </div>
+            
+            {/* Real-time comparison */}
+            <div className="mt-2 text-xs text-blue-600">
+              <strong>Live system:</strong> {liveTableConfigs.filter(c => c.is_active).length} active configurations, 
+              slot duration: {liveGlobalSettings.slot_duration}min
+            </div>
           </div>
+
+          {/* Save Reminder */}
+          {hasUnsavedChanges && (
+            <div className="mt-4 pt-4 border-t border-yellow-200 bg-yellow-50 -mx-6 -mb-6 px-6 py-4 rounded-b-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center text-yellow-800">
+                  <AlertCircle className="w-5 h-5 mr-2" />
+                  <span className="font-medium">Don't forget to save your changes!</span>
+                </div>
+                <button
+                  onClick={saveConfigurations}
+                  disabled={saving}
+                  className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? 'Saving...' : 'Save Now'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
