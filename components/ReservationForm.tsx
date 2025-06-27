@@ -42,8 +42,9 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     advance_booking_days: 30
   })
   const [availableTimeSlots, setAvailableTimeSlots] = useState<{value: string, label: string}[]>([])
-  const [loading, setLoading] = useState(false) // Start as false!
+  const [loading, setLoading] = useState(false)
   const [dataLoaded, setDataLoaded] = useState(false)
+  const [lastUpdateTimestamp, setLastUpdateTimestamp] = useState(0)
 
   const {
     register,
@@ -60,19 +61,53 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     }
   })
 
-  // Simple data fetching function
-  const fetchData = useCallback(async () => {
-    console.log('🔄 ReservationForm: Fetching data...')
+  // Enhanced data fetching function with better cache busting
+  const fetchData = useCallback(async (force = false) => {
+    const now = Date.now()
+    
+    // Prevent too frequent updates unless forced
+    if (!force && now - lastUpdateTimestamp < 2000) {
+      console.log('🚫 ReservationForm: Skipping fetch due to rate limiting')
+      return
+    }
+    
+    console.log('🔄 ReservationForm: Fetching data...', { force, loading, dataLoaded })
     setLoading(true)
+    setLastUpdateTimestamp(now)
     
     try {
-      // Fetch both APIs in parallel
+      // Enhanced cache busting with multiple parameters
+      const timestamp = now
+      const random = Math.random().toString(36).substring(7)
+      const browserRandom = Math.floor(Math.random() * 1000000)
+      
+      // Fetch both APIs in parallel with aggressive cache busting
       const [configResponse, closuresResponse] = await Promise.all([
-        fetch('/api/table-config', {
-          headers: { 'Cache-Control': 'no-cache' }
+        fetch(`/api/table-config?t=${timestamp}&r=${random}&br=${browserRandom}&nocache=${Date.now()}&v=${Math.random()}&force=${force ? 1 : 0}`, {
+          headers: { 
+            'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Last-Modified': new Date(0).toUTCString(),
+            'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
+            'If-None-Match': '*',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-Cache-Buster': timestamp.toString()
+          },
+          cache: 'no-store'
         }),
-        fetch('/api/closures', {
-          headers: { 'Cache-Control': 'no-cache' }
+        fetch(`/api/closures?t=${timestamp}&r=${random}&br=${browserRandom}&nocache=${Date.now()}&v=${Math.random()}&force=${force ? 1 : 0}`, {
+          headers: { 
+            'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Last-Modified': new Date(0).toUTCString(),
+            'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
+            'If-None-Match': '*',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-Cache-Buster': timestamp.toString()
+          },
+          cache: 'no-store'
         })
       ])
       
@@ -80,14 +115,26 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       if (configResponse.ok) {
         const configData = await configResponse.json()
         const activeConfigs = configData.table_configs?.filter((c: any) => c.is_active) || []
-        setTableConfigs(activeConfigs)
-        setGlobalSettings(configData.global_settings || globalSettings)
+        const newGlobalSettings = configData.global_settings || globalSettings
         
-        console.log(`✅ Loaded ${activeConfigs.length} table configurations`)
-        console.log('⚙️ Global settings:', configData.global_settings)
+        console.log('✅ ReservationForm: Updated configurations', {
+          activeConfigs: activeConfigs.length,
+          slotDuration: newGlobalSettings.slot_duration,
+          oldSlotDuration: globalSettings.slot_duration
+        })
+        
+        setTableConfigs(activeConfigs)
+        setGlobalSettings(newGlobalSettings)
+        
+        // Force time slot regeneration if slot duration changed
+        if (newGlobalSettings.slot_duration !== globalSettings.slot_duration) {
+          console.log(`🕒 Slot duration changed: ${globalSettings.slot_duration} → ${newGlobalSettings.slot_duration}`)
+          // Time slots will be regenerated in the useEffect below
+        }
+        
       } else {
         console.error('❌ Failed to fetch table configs:', configResponse.status)
-        // Set defaults so the form still works
+        // Set safe defaults
         setTableConfigs([
           { party_size: 1, table_count: 2, max_reservations_per_slot: 2, is_active: true },
           { party_size: 2, table_count: 6, max_reservations_per_slot: 3, is_active: true },
@@ -101,16 +148,16 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       if (closuresResponse.ok) {
         const closuresData = await closuresResponse.json()
         setClosures(closuresData.closures || [])
-        console.log(`✅ Loaded ${closuresData.closures?.length || 0} closures`)
+        console.log(`✅ ReservationForm: Updated closures (${closuresData.closures?.length || 0})`)
       } else {
         console.error('❌ Failed to fetch closures:', closuresResponse.status)
-        setClosures([]) // Empty array is fine
+        setClosures([])
       }
       
       setDataLoaded(true)
       
     } catch (error) {
-      console.error('❌ Error fetching data:', error)
+      console.error('❌ ReservationForm: Error fetching data:', error)
       // Set defaults so the form still works
       setTableConfigs([
         { party_size: 1, table_count: 2, max_reservations_per_slot: 2, is_active: true },
@@ -120,34 +167,65 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
         { party_size: 8, table_count: 1, max_reservations_per_slot: 1, is_active: true }
       ])
       setClosures([])
-      setDataLoaded(true) // Still mark as loaded so form shows
+      setDataLoaded(true)
     } finally {
       setLoading(false)
-      console.log('🏁 Data fetching completed')
+      console.log('🏁 ReservationForm: Data fetching completed')
     }
-  }, [globalSettings])
+  }, [globalSettings, lastUpdateTimestamp, loading, dataLoaded])
 
-  // Fetch data on mount - only once
+  // Initial data fetch
   useEffect(() => {
     if (!dataLoaded) {
-      fetchData()
+      console.log('🚀 ReservationForm: Initial data fetch')
+      fetchData(true) // Force initial fetch
     }
-  }, [fetchData, dataLoaded])
+  }, [dataLoaded, fetchData])
 
-  // Set up polling for real-time updates (but don't block initial load)
+  // Listen for real-time updates from admin dashboard
   useEffect(() => {
-    if (!dataLoaded) return // Wait for initial load
+    const handleTableConfigUpdate = (event: CustomEvent) => {
+      console.log('📡 ReservationForm: Received table config update event', event.detail)
+      // Force refresh when admin updates table configurations
+      fetchData(true)
+    }
+
+    const handleGlobalRefresh = (event: CustomEvent) => {
+      console.log('📡 ReservationForm: Received global refresh event', event.detail)
+      fetchData(true)
+    }
+
+    const handleClosureUpdate = (event: CustomEvent) => {
+      console.log('📡 ReservationForm: Received closure update event', event.detail)
+      fetchData(true)
+    }
+
+    // Listen to various update events
+    window.addEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
+    window.addEventListener('globalRefresh', handleGlobalRefresh as EventListener)
+    window.addEventListener('closureUpdated', handleClosureUpdate as EventListener)
     
-    console.log('⏰ Setting up polling for updates...')
+    return () => {
+      window.removeEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
+      window.removeEventListener('globalRefresh', handleGlobalRefresh as EventListener)
+      window.removeEventListener('closureUpdated', handleClosureUpdate as EventListener)
+    }
+  }, [fetchData])
+
+  // Set up periodic polling as backup (less frequent to avoid overloading)
+  useEffect(() => {
+    if (!dataLoaded) return
+    
+    console.log('⏰ ReservationForm: Setting up periodic polling...')
     
     const interval = setInterval(() => {
-      console.log('⏰ Polling for updates...')
-      fetchData()
-    }, 10000) // Poll every 10 seconds
+      console.log('⏰ ReservationForm: Periodic update check')
+      fetchData(false) // Non-forced update
+    }, 30000) // Poll every 30 seconds (less aggressive)
     
     return () => {
       clearInterval(interval)
-      console.log('🧹 Cleaned up polling interval')
+      console.log('🧹 ReservationForm: Cleaned up polling interval')
     }
   }, [dataLoaded, fetchData])
 
@@ -169,7 +247,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       const currentPartySize = watch('party_size')
       if (!availablePartySizes.includes(currentPartySize)) {
         setValue('party_size', availablePartySizes[0])
-        console.log(`🔄 Updated default party size to ${availablePartySizes[0]}`)
+        console.log(`🔄 ReservationForm: Updated default party size to ${availablePartySizes[0]}`)
       }
     }
   }, [tableConfigs, setValue, watch])
@@ -200,9 +278,11 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     return dates
   }
 
-  // Generate available time slots based on day of week
+  // Generate available time slots based on day of week - FIXED to use current slot duration
   const generateTimeSlots = useCallback((date: string, duration: number) => {
     if (!date) return []
+    
+    console.log(`🕒 ReservationForm: Generating time slots for ${date} with ${duration}min duration`)
     
     const parsedDate = parseISO(date)
     const dayOfWeek = parsedDate.getDay()
@@ -262,14 +342,22 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       }
     }
     
+    console.log(`📏 ReservationForm: Generated ${slots.length} time slots for ${date}`)
     return slots
   }, [closures])
 
-  // Update time slots whenever date or slot duration changes
+  // Update time slots whenever date, slot duration, or closures change
   useEffect(() => {
+    console.log(`🔄 ReservationForm: Updating time slots for ${selectedDate} with ${globalSettings.slot_duration}min duration`)
     const newSlots = generateTimeSlots(selectedDate, globalSettings.slot_duration)
     setAvailableTimeSlots(newSlots)
-  }, [selectedDate, globalSettings.slot_duration, generateTimeSlots])
+    
+    // If current selected time is no longer available, clear it
+    if (selectedTime && !newSlots.some(slot => slot.value === selectedTime)) {
+      console.log(`⚠️ ReservationForm: Clearing invalid time selection: ${selectedTime}`)
+      setValue('reservation_time', '')
+    }
+  }, [selectedDate, globalSettings.slot_duration, generateTimeSlots, selectedTime, setValue])
 
   const onSubmit = async (data: ReservationFormData) => {
     setIsSubmitting(true)
@@ -407,7 +495,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
         )}
       </div>
 
-      {/* Debug info for development */}
+      {/* Enhanced debug info */}
       {process.env.NODE_ENV === 'development' && (
         <div className="mb-4 p-3 bg-gray-100 rounded text-sm">
           <strong>🐛 Status:</strong>
@@ -418,6 +506,8 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
             <div><strong>Table configs:</strong> {tableConfigs.length} active</div>
             <div><strong>Available party sizes:</strong> {availablePartySizes.join(', ') || 'None'}</div>
             <div><strong>Slot duration:</strong> {globalSettings.slot_duration} minutes</div>
+            <div><strong>Time slots for selected date:</strong> {availableTimeSlots.length}</div>
+            <div><strong>Last update:</strong> {new Date(lastUpdateTimestamp).toLocaleTimeString()}</div>
           </div>
         </div>
       )}
@@ -429,10 +519,11 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
             <strong>⚠️ No tables currently available for booking.</strong>
             <p className="mt-1">Please contact the restaurant directly to make a reservation.</p>
             <button
-              onClick={() => fetchData()}
-              className="mt-2 text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded transition-colors"
+              onClick={() => fetchData(true)}
+              disabled={loading}
+              className="mt-2 text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded transition-colors disabled:opacity-50"
             >
-              Refresh Configuration
+              {loading ? 'Refreshing...' : 'Refresh Configuration'}
             </button>
           </div>
         </div>
@@ -488,6 +579,11 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           {selectedDate && availableTimeSlots.length === 0 && (
             <p className="text-red-500 text-sm mt-1">
               No time slots available for this date. The restaurant may be closed.
+            </p>
+          )}
+          {selectedDate && (
+            <p className="text-blue-500 text-sm mt-1">
+              Time slots: {globalSettings.slot_duration} minute intervals
             </p>
           )}
         </div>
@@ -609,6 +705,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
             ) : (
               <li className="text-red-600">• Currently no table sizes are available for online booking</li>
             )}
+            <li>• Time slots are {globalSettings.slot_duration} minutes apart</li>
             <li>• For larger parties or special arrangements, please call us directly</li>
             <li>• Confirmation email will be sent immediately</li>
           </ul>
@@ -618,13 +715,16 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
         <div className="text-center">
           <button
             type="button"
-            onClick={() => fetchData()}
+            onClick={() => fetchData(true)}
             disabled={loading}
             className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50 flex items-center justify-center mx-auto"
           >
             <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
             {loading ? 'Refreshing...' : 'Refresh Configuration'}
           </button>
+          <p className="text-xs text-gray-500 mt-1">
+            Last updated: {lastUpdateTimestamp ? new Date(lastUpdateTimestamp).toLocaleTimeString() : 'Never'}
+          </p>
         </div>
       </form>
     </div>
