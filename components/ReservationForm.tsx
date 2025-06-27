@@ -44,18 +44,16 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
   const [availableTimeSlots, setAvailableTimeSlots] = useState<{value: string, label: string}[]>([])
   const [loading, setLoading] = useState(false)
   const [dataLoaded, setDataLoaded] = useState(false)
-  const [lastUpdateTimestamp, setLastUpdateTimestamp] = useState(0)
-  const [fetchCounter, setFetchCounter] = useState(0)
+  const [lastSuccessfulFetch, setLastSuccessfulFetch] = useState(0)
+  const [forceUpdateTrigger, setForceUpdateTrigger] = useState(0)
   
-  // Refs to prevent stale closures in event handlers
-  const globalSettingsRef = useRef(globalSettings)
-  const lastFetchRef = useRef(0)
+  // Refs to track state and prevent stale closures
   const isMountedRef = useRef(true)
+  const lastFetchAttemptRef = useRef(0)
+  const fetchInProgressRef = useRef(false)
 
-  // Update refs when state changes
-  useEffect(() => {
-    globalSettingsRef.current = globalSettings
-  }, [globalSettings])
+  // Track if we're editing to prevent data overwrites
+  const [isUserInteracting, setIsUserInteracting] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -78,200 +76,205 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     }
   })
 
-  // AGGRESSIVE data fetching with no rate limiting for real-time updates
+  // SIMPLIFIED data fetching with better error handling and no aggressive polling
   const fetchData = useCallback(async (force = false, source = 'unknown') => {
     if (!isMountedRef.current) return
     
     const now = Date.now()
     
-    // Only apply rate limiting for non-forced updates
-    if (!force && now - lastFetchRef.current < 1000) {
-      console.log('🚫 ReservationForm: Rate limited fetch')
+    // Prevent duplicate requests
+    if (fetchInProgressRef.current) {
+      console.log('🚫 Fetch already in progress, skipping')
       return
     }
     
-    console.log(`🔄 ReservationForm: Fetching data (${source})`, { 
-      force, 
-      counter: fetchCounter + 1,
-      lastFetch: lastFetchRef.current ? new Date(lastFetchRef.current).toLocaleTimeString() : 'never'
-    })
+    // Rate limiting - allow more frequent forced updates
+    if (!force && now - lastFetchAttemptRef.current < 3000) {
+      console.log('🚫 Rate limited - too frequent requests')
+      return
+    }
     
-    lastFetchRef.current = now
+    fetchInProgressRef.current = true
+    lastFetchAttemptRef.current = now
     setLoading(true)
-    setLastUpdateTimestamp(now)
-    setFetchCounter(prev => prev + 1)
+    
+    console.log(`🔄 ReservationForm: Fetching data (${source}, force: ${force})`)
     
     try {
-      // Ultra-aggressive cache busting
+      // Create unique cache-busting parameters
       const timestamp = now
       const random = Math.random().toString(36).substring(2, 15)
-      const browserRandom = Math.floor(Math.random() * 1000000)
-      const fetchId = `${timestamp}-${random}-${browserRandom}`
+      const cacheParams = `t=${timestamp}&r=${random}&v=${Math.random()}&force=${force ? 1 : 0}`
       
-      console.log(`📡 Making API calls with fetchId: ${fetchId}`)
-      
-      // Fetch table configs with maximum cache busting
-      const configUrl = `/api/table-config?_t=${timestamp}&_r=${random}&_br=${browserRandom}&_force=${force ? 1 : 0}&_counter=${fetchCounter}&_source=${encodeURIComponent(source)}&_fetchId=${fetchId}&_nocache=${Math.random()}`
-      
-      console.log('🔗 Config URL:', configUrl)
-      
-      const configResponse = await fetch(configUrl, {
+      // Fetch table configurations first
+      console.log('📊 Fetching table configurations...')
+      const configResponse = await fetch(`/api/table-config?${cacheParams}`, {
         method: 'GET',
         headers: { 
-          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
-          'Expires': '0',
-          'Last-Modified': new Date(0).toUTCString(),
-          'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
-          'If-None-Match': '*',
-          'X-Requested-With': 'XMLHttpRequest',
-          'X-Cache-Buster': fetchId,
-          'X-Force-Refresh': force ? '1' : '0',
-          'X-Fetch-Source': source
-        },
-        cache: 'no-store'
+          'Expires': '0'
+        }
       })
       
-      console.log('📊 Config response:', configResponse.status, configResponse.headers.get('X-Timestamp'))
-      
-      if (configResponse.ok) {
-        const configData = await configResponse.json()
-        const activeConfigs = configData.table_configs?.filter((c: any) => c.is_active) || []
-        const newGlobalSettings = configData.global_settings || {
-          max_party_size: 10,
-          slot_duration: 30,
-          advance_booking_days: 30
-        }
-        
-        console.log('✅ Config data received:', {
-          activeConfigs: activeConfigs.length,
-          oldSlotDuration: globalSettingsRef.current.slot_duration,
-          newSlotDuration: newGlobalSettings.slot_duration,
-          changed: newGlobalSettings.slot_duration !== globalSettingsRef.current.slot_duration,
-          source: configData.source || 'unknown',
-          timestamp: configData.timestamp
-        })
-        
-        // Force update even if values seem the same
-        setTableConfigs([...activeConfigs])
-        setGlobalSettings({ ...newGlobalSettings })
-        
-        if (newGlobalSettings.slot_duration !== globalSettingsRef.current.slot_duration) {
-          console.log(`🕒 SLOT DURATION CHANGED: ${globalSettingsRef.current.slot_duration} → ${newGlobalSettings.slot_duration}`)
-          toast.success(`Time slots updated to ${newGlobalSettings.slot_duration} minute intervals`)
-        }
-        
-      } else {
-        console.error('❌ Config fetch failed:', configResponse.status, await configResponse.text())
+      if (!configResponse.ok) {
         throw new Error(`Config API failed: ${configResponse.status}`)
       }
       
-      // Fetch closures
-      const closuresUrl = `/api/closures?_t=${timestamp}&_r=${random}&_br=${browserRandom}&_fetchId=${fetchId}`
-      const closuresResponse = await fetch(closuresUrl, {
-        headers: { 
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'X-Cache-Buster': fetchId
-        },
-        cache: 'no-store'
+      const configData = await configResponse.json()
+      console.log('📊 Config data received:', {
+        configs: configData.table_configs?.length || 0,
+        slotDuration: configData.global_settings?.slot_duration,
+        source: configData.source
       })
       
-      if (closuresResponse.ok) {
-        const closuresData = await closuresResponse.json()
-        setClosures([...(closuresData.closures || [])])
-        console.log(`✅ Closures updated (${closuresData.closures?.length || 0})`)
-      } else {
-        console.error('❌ Closures fetch failed:', closuresResponse.status)
-        setClosures([])
+      // Fetch closures
+      console.log('📅 Fetching closures...')
+      const closuresResponse = await fetch(`/api/closures?${cacheParams}`, {
+        headers: { 
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      })
+      
+      if (!closuresResponse.ok) {
+        throw new Error(`Closures API failed: ${closuresResponse.status}`)
       }
       
-      setDataLoaded(true)
+      const closuresData = await closuresResponse.json()
+      console.log('📅 Closures data received:', {
+        count: closuresData.closures?.length || 0
+      })
+      
+      // Update state if component is still mounted and not being interacted with
+      if (isMountedRef.current && !isUserInteracting) {
+        const activeConfigs = configData.table_configs?.filter((c: any) => c.is_active) || []
+        const newGlobalSettings = configData.global_settings || globalSettings
+        
+        // Force update state
+        setTableConfigs([...activeConfigs])
+        setGlobalSettings({ ...newGlobalSettings })
+        setClosures([...(closuresData.closures || [])])
+        
+        // Trigger re-generation of time slots
+        setForceUpdateTrigger(prev => prev + 1)
+        
+        setLastSuccessfulFetch(now)
+        setDataLoaded(true)
+        
+        console.log('✅ ReservationForm: Data updated successfully', {
+          activeConfigs: activeConfigs.length,
+          slotDuration: newGlobalSettings.slot_duration,
+          closures: closuresData.closures?.length || 0
+        })
+      }
       
     } catch (error) {
       console.error('❌ ReservationForm fetch error:', error)
-      // Don't set defaults on error - keep trying
-      toast.error('Failed to update configuration - retrying...')
+      toast.error('Failed to load latest settings. Using cached data.')
       
-      // Retry after a short delay
-      setTimeout(() => {
-        if (isMountedRef.current) {
-          fetchData(true, 'retry-after-error')
-        }
-      }, 2000)
+      // Don't fail completely - use existing data
+      if (!dataLoaded) {
+        // Set defaults only if we have no data at all
+        setTableConfigs([
+          { party_size: 1, table_count: 2, max_reservations_per_slot: 2, is_active: true },
+          { party_size: 2, table_count: 6, max_reservations_per_slot: 3, is_active: true },
+          { party_size: 4, table_count: 4, max_reservations_per_slot: 2, is_active: true },
+          { party_size: 6, table_count: 2, max_reservations_per_slot: 1, is_active: true },
+          { party_size: 8, table_count: 1, max_reservations_per_slot: 1, is_active: true }
+        ])
+        setDataLoaded(true)
+      }
       
     } finally {
       if (isMountedRef.current) {
         setLoading(false)
+        fetchInProgressRef.current = false
       }
     }
-  }, [fetchCounter])
+  }, [globalSettings, isUserInteracting, dataLoaded])
 
-  // Initial data fetch
+  // Initial data fetch on mount
   useEffect(() => {
-    console.log('🚀 ReservationForm: Mounting - initial fetch')
+    console.log('🚀 ReservationForm: Initial mount - fetching data')
     fetchData(true, 'initial-mount')
-  }, []) // Only on mount
+  }, []) // Empty dependency array for mount only
 
-  // AGGRESSIVE event listeners with immediate refresh
+  // Event listeners for admin updates
   useEffect(() => {
-    const handleTableConfigUpdate = (event: CustomEvent) => {
-      console.log('📡 IMMEDIATE: Table config update event received', event.detail)
-      // Immediate refresh with no delay
-      fetchData(true, 'table-config-event')
+    const handleTableConfigUpdate = () => {
+      console.log('📡 Table config update event received')
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          fetchData(true, 'table-config-event')
+        }
+      }, 500) // Small delay to let admin save complete
     }
 
-    const handleGlobalRefresh = (event: CustomEvent) => {
-      console.log('📡 IMMEDIATE: Global refresh event received', event.detail)
-      fetchData(true, 'global-refresh-event')
+    const handleGlobalRefresh = () => {
+      console.log('📡 Global refresh event received')
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          fetchData(true, 'global-refresh-event')
+        }
+      }, 500)
     }
 
-    const handleClosureUpdate = (event: CustomEvent) => {
-      console.log('📡 IMMEDIATE: Closure update event received', event.detail)
-      fetchData(true, 'closure-update-event')
-    }
-
-    // Multiple event types to catch all updates
-    const events = [
-      'tableConfigUpdated',
-      'globalRefresh', 
-      'closureUpdated',
-      'reservationUpdated',
-      'adminConfigChange'
-    ]
-
+    // Listen to admin events
+    const events = ['tableConfigUpdated', 'globalRefresh', 'closureUpdated', 'adminConfigChange']
+    
     events.forEach(eventType => {
-      window.addEventListener(eventType, handleTableConfigUpdate as EventListener)
+      window.addEventListener(eventType, handleTableConfigUpdate)
     })
     
-    console.log('👂 ReservationForm: Event listeners attached for:', events.join(', '))
+    console.log('👂 ReservationForm: Event listeners attached')
     
     return () => {
       events.forEach(eventType => {
-        window.removeEventListener(eventType, handleTableConfigUpdate as EventListener)
+        window.removeEventListener(eventType, handleTableConfigUpdate)
       })
       console.log('🧹 ReservationForm: Event listeners cleaned up')
     }
   }, [fetchData])
 
-  // Aggressive polling as backup (every 5 seconds)
+  // Periodic refresh every 30 seconds (much less aggressive)
   useEffect(() => {
     if (!dataLoaded) return
     
-    console.log('⏰ Setting up aggressive polling every 5 seconds')
+    console.log('⏰ Setting up periodic refresh every 30 seconds')
     
     const interval = setInterval(() => {
-      console.log('⏰ Polling tick - checking for updates')
-      fetchData(false, 'polling-interval')
-    }, 5000) // Every 5 seconds
+      if (!isUserInteracting && isMountedRef.current) {
+        console.log('⏰ Periodic refresh tick')
+        fetchData(false, 'periodic-refresh')
+      }
+    }, 30000) // Every 30 seconds instead of 5
     
     return () => {
       clearInterval(interval)
-      console.log('🧹 Polling cleaned up')
+      console.log('🧹 Periodic refresh cleaned up')
     }
-  }, [dataLoaded, fetchData])
+  }, [dataLoaded, isUserInteracting, fetchData])
 
   const selectedDate = watch('reservation_date')
   const selectedTime = watch('reservation_time')
+
+  // Track user interaction to prevent overwrites
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout
+    
+    if (isUserInteracting) {
+      // Clear interaction flag after 10 seconds of no activity
+      timeoutId = setTimeout(() => {
+        setIsUserInteracting(false)
+        console.log('🤝 User interaction timeout - allowing data updates')
+      }, 10000)
+    }
+    
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [isUserInteracting])
 
   // Get available party sizes
   const getAvailablePartySizes = () => {
@@ -318,7 +321,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     return dates
   }
 
-  // Generate time slots with CURRENT slot duration
+  // Generate time slots - FIXED to respond to changes immediately
   const generateTimeSlots = useCallback((date: string, duration: number) => {
     if (!date) return []
     
@@ -385,13 +388,13 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     return slots
   }, [closures])
 
-  // FORCE time slot regeneration whenever globalSettings change
+  // FORCE time slot regeneration when ANY dependency changes
   useEffect(() => {
-    console.log(`🔄 FORCING time slot regeneration: ${selectedDate} with ${globalSettings.slot_duration}min`)
+    console.log(`🔄 FORCE regenerating time slots: selectedDate=${selectedDate}, slotDuration=${globalSettings.slot_duration}, trigger=${forceUpdateTrigger}`)
     
     if (selectedDate) {
       const newSlots = generateTimeSlots(selectedDate, globalSettings.slot_duration)
-      setAvailableTimeSlots([...newSlots]) // Force array recreation
+      setAvailableTimeSlots([...newSlots]) // Force new array
       
       // Clear invalid time selection
       if (selectedTime && !newSlots.some(slot => slot.value === selectedTime)) {
@@ -401,7 +404,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     } else {
       setAvailableTimeSlots([])
     }
-  }, [selectedDate, globalSettings.slot_duration, generateTimeSlots, selectedTime, setValue])
+  }, [selectedDate, globalSettings.slot_duration, generateTimeSlots, selectedTime, setValue, forceUpdateTrigger])
 
   const onSubmit = async (data: ReservationFormData) => {
     setIsSubmitting(true)
@@ -445,6 +448,24 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       toast.error(error instanceof Error ? error.message : 'Failed to create reservation')
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  // Manual refresh function
+  const handleManualRefresh = useCallback(() => {
+    console.log('🔄 Manual refresh triggered by user')
+    setIsUserInteracting(true) // Prevent overwrites temporarily
+    setLoading(true)
+    fetchData(true, 'manual-refresh').finally(() => {
+      setTimeout(() => setIsUserInteracting(false), 2000) // Allow updates after 2 seconds
+    })
+  }, [fetchData])
+
+  // Handle form interactions
+  const handleFormInteraction = () => {
+    if (!isUserInteracting) {
+      console.log('🤝 User started interacting with form')
+      setIsUserInteracting(true)
     }
   }
 
@@ -534,18 +555,18 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
         )}
       </div>
 
-      {/* Enhanced debug info with real-time updates */}
+      {/* Debug info */}
       {process.env.NODE_ENV === 'development' && (
         <div className="mb-4 p-3 bg-gray-100 rounded text-sm">
-          <strong>🐛 Real-time Status:</strong>
+          <strong>🐛 Status:</strong>
           <div className="mt-1 space-y-1">
-            <div><strong>Fetch #:</strong> {fetchCounter}</div>
             <div><strong>Slot Duration:</strong> <span className="font-bold text-blue-600">{globalSettings.slot_duration} minutes</span></div>
             <div><strong>Available Party Sizes:</strong> {availablePartySizes.join(', ') || 'None'}</div>
             <div><strong>Time Slots for Selected Date:</strong> {availableTimeSlots.length}</div>
-            <div><strong>Last Update:</strong> {lastUpdateTimestamp ? new Date(lastUpdateTimestamp).toLocaleTimeString() : 'Never'}</div>
+            <div><strong>Last Successful Fetch:</strong> {lastSuccessfulFetch ? new Date(lastSuccessfulFetch).toLocaleTimeString() : 'Never'}</div>
             <div><strong>Data Loaded:</strong> {dataLoaded ? '✅' : '❌'}</div>
-            <div><strong>Loading:</strong> {loading ? '🔄' : '✅'}</div>
+            <div><strong>User Interacting:</strong> {isUserInteracting ? '🤝' : '💤'}</div>
+            <div><strong>Force Update Trigger:</strong> {forceUpdateTrigger}</div>
           </div>
         </div>
       )}
@@ -557,7 +578,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
             <strong>⚠️ No tables currently available for booking.</strong>
             <p className="mt-1">Please contact the restaurant directly to make a reservation.</p>
             <button
-              onClick={() => fetchData(true, 'manual-refresh-no-tables')}
+              onClick={handleManualRefresh}
               disabled={loading}
               className="mt-2 text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded transition-colors disabled:opacity-50"
             >
@@ -567,7 +588,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
         </div>
       )}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" onChange={handleFormInteraction}>
         {/* Date Selection */}
         <div>
           <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
@@ -576,6 +597,10 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           </label>
           <select
             {...register('reservation_date')}
+            onChange={(e) => {
+              handleFormInteraction()
+              setValue('reservation_date', e.target.value)
+            }}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
             <option value="">Select a date</option>
@@ -599,6 +624,10 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           <select
             {...register('reservation_time')}
             disabled={!selectedDate}
+            onChange={(e) => {
+              handleFormInteraction()
+              setValue('reservation_time', e.target.value)
+            }}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
           >
             <option value="">Select a time</option>
@@ -635,6 +664,10 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           <select
             {...register('party_size', { valueAsNumber: true })}
             disabled={availablePartySizes.length === 0}
+            onChange={(e) => {
+              handleFormInteraction()
+              setValue('party_size', parseInt(e.target.value))
+            }}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
           >
             {availablePartySizes.length === 0 ? (
@@ -660,6 +693,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           <input
             type="text"
             {...register('name')}
+            onFocus={handleFormInteraction}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="Your full name"
           />
@@ -677,6 +711,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           <input
             type="email"
             {...register('email')}
+            onFocus={handleFormInteraction}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="your.email@example.com"
           />
@@ -694,6 +729,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           <input
             type="tel"
             {...register('phone')}
+            onFocus={handleFormInteraction}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="(555) 123-4567"
           />
@@ -710,6 +746,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           </label>
           <textarea
             {...register('special_requests')}
+            onFocus={handleFormInteraction}
             rows={3}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="Allergies, dietary restrictions, special occasions, etc."
@@ -753,16 +790,15 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
         <div className="text-center">
           <button
             type="button"
-            onClick={() => fetchData(true, 'manual-refresh-button')}
+            onClick={handleManualRefresh}
             disabled={loading}
             className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50 flex items-center justify-center mx-auto"
           >
             <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Syncing...' : 'Force Refresh Settings'}
+            {loading ? 'Syncing...' : 'Refresh Settings'}
           </button>
           <div className="text-xs text-gray-500 mt-1 space-y-1">
-            <div>Last updated: {lastUpdateTimestamp ? new Date(lastUpdateTimestamp).toLocaleTimeString() : 'Never'}</div>
-            <div>Fetch count: {fetchCounter}</div>
+            <div>Last updated: {lastSuccessfulFetch ? new Date(lastSuccessfulFetch).toLocaleTimeString() : 'Never'}</div>
             <div className="font-medium text-blue-600">Current slot duration: {globalSettings.slot_duration} minutes</div>
           </div>
         </div>
@@ -772,10 +808,10 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           <div className="flex items-center justify-between">
             <div className="flex items-center">
               <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
-              <span className="text-sm text-green-700 font-medium">Real-time sync active</span>
+              <span className="text-sm text-green-700 font-medium">Settings sync active</span>
             </div>
             <div className="text-xs text-green-600">
-              Auto-refresh every 5s
+              Updates from admin
             </div>
           </div>
         </div>
