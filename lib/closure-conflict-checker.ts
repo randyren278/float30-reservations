@@ -240,3 +240,187 @@ export async function checkReservationAgainstClosures(reservationDate: string, r
     return { hasConflict: false }
   }
 }
+
+// Utility function to format conflict details for display
+export function formatConflictDetails(conflicts: ConflictingReservation[]): string {
+  if (conflicts.length === 0) return 'No conflicts found'
+  
+  const summary = getConflictSummary(conflicts)
+  let details = `${summary.totalReservations} reservation${summary.totalReservations !== 1 ? 's' : ''}`
+  details += ` (${summary.totalGuests} guest${summary.totalGuests !== 1 ? 's' : ''})`
+  
+  if (summary.timeRange) {
+    details += ` from ${summary.timeRange.earliest} to ${summary.timeRange.latest}`
+  }
+  
+  if (summary.hasSpecialRequests) {
+    details += ' (includes special requests)'
+  }
+  
+  return details
+}
+
+// Batch process multiple closures
+export async function batchProcessClosureConflicts(
+  closures: RestaurantClosure[], 
+  forceCancel: boolean = false
+): Promise<{
+  totalConflicts: number
+  totalCancelled: number
+  totalFailed: number
+  results: any[]
+}> {
+  console.log(`🔄 Batch processing ${closures.length} closures for conflicts`)
+  
+  let totalConflicts = 0
+  let totalCancelled = 0
+  let totalFailed = 0
+  const results = []
+  
+  for (const closure of closures) {
+    try {
+      const result = await processClosureConflicts(closure, forceCancel)
+      
+      totalConflicts += result.conflicts.length
+      totalCancelled += result.cancelled.length
+      totalFailed += result.failed.length
+      
+      results.push({
+        closure,
+        ...result
+      })
+      
+    } catch (error) {
+      console.error(`❌ Error processing closure ${closure.closure_name}:`, error)
+      results.push({
+        closure,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        conflicts: [],
+        cancelled: [],
+        failed: [],
+        requiresConfirmation: false
+      })
+    }
+  }
+  
+  console.log(`✅ Batch processing complete: ${totalConflicts} conflicts, ${totalCancelled} cancelled, ${totalFailed} failed`)
+  
+  return {
+    totalConflicts,
+    totalCancelled,
+    totalFailed,
+    results
+  }
+}
+
+// Validate closure data before processing
+export function validateClosureData(closure: Partial<RestaurantClosure>): {
+  isValid: boolean
+  errors: string[]
+} {
+  const errors: string[] = []
+  
+  if (!closure.closure_date) {
+    errors.push('Closure date is required')
+  }
+  
+  if (!closure.closure_name || closure.closure_name.trim() === '') {
+    errors.push('Closure name is required')
+  }
+  
+  if (!closure.all_day) {
+    if (!closure.start_time) {
+      errors.push('Start time is required for partial closures')
+    }
+    if (!closure.end_time) {
+      errors.push('End time is required for partial closures')
+    }
+    if (closure.start_time && closure.end_time && closure.start_time >= closure.end_time) {
+      errors.push('Start time must be before end time')
+    }
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors
+  }
+}
+
+// Get closure statistics
+export async function getClosureStatistics(dateFrom?: string, dateTo?: string): Promise<{
+  totalClosures: number
+  allDayClosures: number
+  partialClosures: number
+  affectedReservations: number
+  mostCommonReason: string | null
+}> {
+  try {
+    let query = supabaseAdmin
+      .from('restaurant_closures')
+      .select('*')
+    
+    if (dateFrom) {
+      query = query.gte('closure_date', dateFrom)
+    }
+    
+    if (dateTo) {
+      query = query.lte('closure_date', dateTo)
+    }
+    
+    const { data: closures, error } = await query
+    
+    if (error) throw error
+    
+    if (!closures || closures.length === 0) {
+      return {
+        totalClosures: 0,
+        allDayClosures: 0,
+        partialClosures: 0,
+        affectedReservations: 0,
+        mostCommonReason: null
+      }
+    }
+    
+    const allDayClosures = closures.filter(c => c.all_day).length
+    const partialClosures = closures.filter(c => !c.all_day).length
+    
+    // Count affected reservations (would need to check each closure)
+    let affectedReservations = 0
+    for (const closure of closures) {
+      const conflicts = await checkClosureConflicts(closure)
+      affectedReservations += conflicts.length
+    }
+    
+    // Find most common reason
+    const reasons = closures
+      .map(c => c.closure_reason)
+      .filter(r => r && r.trim() !== '')
+    
+    const reasonCounts = reasons.reduce((acc, reason) => {
+      acc[reason!] = (acc[reason!] || 0) + 1
+      return acc
+    }, {} as Record<string, number>)
+    
+    const mostCommonReason = Object.keys(reasonCounts).length > 0
+      ? Object.keys(reasonCounts).reduce((a, b) => reasonCounts[a] > reasonCounts[b] ? a : b)
+      : null
+    
+    return {
+      totalClosures: closures.length,
+      allDayClosures,
+      partialClosures,
+      affectedReservations,
+      mostCommonReason
+    }
+    
+  } catch (error) {
+    console.error('Error getting closure statistics:', error)
+    return {
+      totalClosures: 0,
+      allDayClosures: 0,
+      partialClosures: 0,
+      affectedReservations: 0,
+      mostCommonReason: null
+    }
+  }
+}

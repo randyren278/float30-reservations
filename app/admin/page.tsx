@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { format, parseISO, isToday, isFuture } from 'date-fns'
-import { Calendar, Clock, Users, Mail, Phone, CheckCircle, XCircle, AlertCircle, Download, Grid, List, Settings, RefreshCw } from 'lucide-react'
+import { Calendar, Clock, Users, Mail, Phone, CheckCircle, XCircle, AlertCircle, Download, Grid, List, Settings, RefreshCw, Plus, UserPlus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import AdminCalendar from '@/components/AdminCalender'
 import ReservationModal from '@/components/ReservationModal'
 import HolidayManager from '@/components/HolidayManager'
+import TableManager from '@/components/TableManager'
+import AddReservation from '@/components/AddReservations'
 
 interface Reservation {
   id: string
@@ -29,7 +31,7 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState<'all' | 'today' | 'upcoming' | 'past'>('upcoming')
   const [statusFilter, setStatusFilter] = useState<'all' | 'confirmed' | 'cancelled' | 'completed' | 'no_show'>('all')
-  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'closures'>('calendar')
+  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'closures' | 'tables' | 'add-reservation'>('calendar')
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
@@ -402,6 +404,28 @@ export default function AdminDashboard() {
                   List
                 </button>
                 <button
+                  onClick={() => setViewMode('add-reservation')}
+                  className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    viewMode === 'add-reservation'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Add Reservation
+                </button>
+                <button
+                  onClick={() => setViewMode('tables')}
+                  className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    viewMode === 'tables'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Settings className="w-4 h-4 mr-2" />
+                  Tables
+                </button>
+                <button
                   onClick={() => setViewMode('closures')}
                   className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     viewMode === 'closures'
@@ -444,7 +468,7 @@ export default function AdminDashboard() {
                 </>
               )}
               
-              {viewMode !== 'closures' && (
+              {viewMode !== 'closures' && viewMode !== 'tables' && viewMode !== 'add-reservation' && (
                 <div className="flex gap-2">
                   <button
                     onClick={fetchReservations}
@@ -467,7 +491,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Calendar, List, or Closures View */}
+        {/* Calendar, List, Closures, Tables, or Add Reservation View */}
         {viewMode === 'calendar' ? (
           <AdminCalendar
             onReservationClick={handleReservationClick}
@@ -476,6 +500,20 @@ export default function AdminDashboard() {
         ) : viewMode === 'closures' ? (
           <HolidayManager
             onClosureUpdate={handleClosureUpdate}
+          />
+        ) : viewMode === 'tables' ? (
+          <TableManager
+            onSettingsUpdate={triggerGlobalRefresh}
+          />
+        ) : viewMode === 'add-reservation' ? (
+          <AddReservation
+            onSuccess={(reservation) => {
+              console.log('✅ Reservation created:', reservation)
+              triggerGlobalRefresh()
+              // Optionally switch back to calendar view
+              setViewMode('calendar')
+            }}
+            onCancel={() => setViewMode('calendar')}
           />
         ) : (
           /* List View (existing table) */
