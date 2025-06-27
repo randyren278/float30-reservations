@@ -168,13 +168,60 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     fetchData()
   }, [fetchData])
 
-  // Listen for table configuration updates from admin
+  // Production-ready polling for configuration changes
   useEffect(() => {
+    let configPollingInterval: NodeJS.Timeout
+    let lastConfigChecksum = ''
+    
+    const pollConfigurationChanges = async () => {
+      try {
+        // Use a lightweight checksum endpoint or timestamp approach
+        const timestamp = Date.now()
+        const response = await fetch(`/api/table-config?checksum=true&t=${timestamp}&r=${Math.random()}`, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'X-Force-Refresh': 'true'
+          },
+          cache: 'no-store'
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          const currentChecksum = JSON.stringify({
+            slotDuration: data.global_settings?.slot_duration,
+            configs: data.table_configs?.map((c: any) => ({id: c.party_size, active: c.is_active})),
+            timestamp: data.timestamp
+          })
+          
+          if (lastConfigChecksum && lastConfigChecksum !== currentChecksum) {
+            console.log('🔄 ReservationForm: Configuration changed in production, refreshing...')
+            await forceRefreshTableConfigs()
+            
+            // Update slot duration immediately
+            if (data.global_settings?.slot_duration) {
+              setSlotDuration(data.global_settings.slot_duration)
+            }
+          }
+          
+          lastConfigChecksum = currentChecksum
+        }
+      } catch (error) {
+        console.error('Error polling configuration changes:', error)
+      }
+    }
+    
+    // Initial check
+    pollConfigurationChanges()
+    
+    // Poll every 3 seconds in production for real-time updates
+    configPollingInterval = setInterval(pollConfigurationChanges, 3000)
+    
+    // Also listen for events (for development and immediate updates)
     const handleTableConfigUpdate = (event: CustomEvent) => {
       console.log('📡 ReservationForm: Received table config update event:', event.detail)
       forceRefreshTableConfigs()
       
-      // Immediately update slot duration if provided
       if (event.detail && event.detail.slotDuration) {
         console.log('🕒 ReservationForm: Updating slot duration to:', event.detail.slotDuration)
         setSlotDuration(event.detail.slotDuration)
@@ -188,11 +235,13 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
       }
     }
 
-    // Listen for custom events
     window.addEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
     window.addEventListener('slotDurationChanged', handleSlotDurationChange as EventListener)
 
     return () => {
+      if (configPollingInterval) {
+        clearInterval(configPollingInterval)
+      }
       window.removeEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
       window.removeEventListener('slotDurationChanged', handleSlotDurationChange as EventListener)
     }

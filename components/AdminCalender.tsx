@@ -222,19 +222,60 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     window.addEventListener('closureDeleted', handleClosureUpdate)
     window.addEventListener('closureCreated', handleClosureUpdate)
     
-    // Listen for table config updates (which might change slot duration)
-    const handleTableConfigUpdate = () => {
-      console.log('📡 AdminCalendar: Received table config update event, refreshing slot duration...')
-      fetchSlotDuration()
+    // Production-ready configuration polling
+    let configPollingInterval: NodeJS.Timeout
+    let lastSlotDuration = slotDuration
+    
+    const pollSlotDurationChanges = async () => {
+      try {
+        const timestamp = Date.now()
+        const response = await fetch(`/api/table-config?checksum=true&t=${timestamp}&r=${Math.random()}`, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'X-Force-Refresh': 'true'
+          },
+          cache: 'no-store'
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          const currentSlotDuration = data.global_settings?.slot_duration || 30
+          
+          if (lastSlotDuration !== currentSlotDuration) {
+            console.log('🕒 AdminCalendar: Slot duration changed in production:', lastSlotDuration, '->', currentSlotDuration)
+            setSlotDuration(currentSlotDuration)
+            lastSlotDuration = currentSlotDuration
+          }
+        }
+      } catch (error) {
+        console.error('Error polling slot duration changes:', error)
+      }
     }
     
-    window.addEventListener('tableConfigUpdated', handleTableConfigUpdate)
+    // Poll every 3 seconds for production
+    configPollingInterval = setInterval(pollSlotDurationChanges, 3000)
+    
+    // Listen for table config updates (which might change slot duration)
+    const handleTableConfigUpdate = (event: CustomEvent) => {
+      console.log('📡 AdminCalendar: Received table config update event, refreshing slot duration...')
+      fetchSlotDuration()
+      
+      if (event.detail && event.detail.slotDuration) {
+        setSlotDuration(event.detail.slotDuration)
+      }
+    }
+    
+    window.addEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
 
     return () => {
+      if (configPollingInterval) {
+        clearInterval(configPollingInterval)
+      }
       window.removeEventListener('closureUpdated', handleClosureUpdate)
       window.removeEventListener('closureDeleted', handleClosureUpdate) 
       window.removeEventListener('closureCreated', handleClosureUpdate)
-      window.removeEventListener('tableConfigUpdated', handleTableConfigUpdate)
+      window.removeEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
     }
   }, [forceRefreshClosures, fetchSlotDuration])
 
