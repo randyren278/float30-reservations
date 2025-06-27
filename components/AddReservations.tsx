@@ -53,10 +53,18 @@ export default function AddReservation({ onSuccess, onCancel }: AddReservationPr
       try {
         // Fetch closures
         const timestamp = new Date().getTime()
-        const closuresResponse = await fetch(`/api/closures?t=${timestamp}&r=${Math.random()}`, {
+        const random = Math.random().toString(36).substring(7)
+        const browserRandom = Math.floor(Math.random() * 1000000)
+        const closuresResponse = await fetch(`/api/closures?t=${timestamp}&r=${random}&br=${browserRandom}&nocache=${Date.now()}&v=${Math.random()}&admin=1`, {
           headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache'
+            'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Last-Modified': new Date(0).toUTCString(),
+            'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
+            'If-None-Match': '*',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-Cache-Buster': timestamp.toString()
           },
           cache: 'no-store'
         })
@@ -67,10 +75,20 @@ export default function AddReservation({ onSuccess, onCancel }: AddReservationPr
         }
 
         // Fetch table configurations for admin (use admin auth)
-        const configResponse = await fetch('/api/admin/table-config', {
+        const timestamp2 = new Date().getTime()
+        const random2 = Math.random().toString(36).substring(7)
+        const browserRandom2 = Math.floor(Math.random() * 1000000)
+        const configResponse = await fetch(`/api/admin/table-config?t=${timestamp2}&r=${random2}&br=${browserRandom2}&nocache=${Date.now()}&v=${Math.random()}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`,
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Last-Modified': new Date(0).toUTCString(),
+            'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
+            'If-None-Match': '*',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-Cache-Buster': timestamp2.toString()
           },
           cache: 'no-store'
         })

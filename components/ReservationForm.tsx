@@ -64,18 +64,23 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     try {
       const timestamp = new Date().getTime()
       const random = Math.random().toString(36).substring(7)
-      const url = `/api/table-config?t=${timestamp}&r=${random}&force=true`
+      const browserRandom = Math.floor(Math.random() * 1000000)
+      const url = `/api/table-config?t=${timestamp}&r=${random}&br=${browserRandom}&force=true&nocache=${Date.now()}&v=${Math.random()}`
       
       console.log('Fetching table configs from:', url)
       
       const configResponse = await fetch(url, {
         method: 'GET',
         headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate',
+          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
           'Pragma': 'no-cache',
           'Expires': '0',
+          'Last-Modified': new Date(0).toUTCString(),
           'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
-          'If-None-Match': '*'
+          'If-None-Match': '*',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-Cache-Buster': timestamp.toString(),
+          'Accept': 'application/json, */*'
         },
         cache: 'no-store'
       })
@@ -122,15 +127,23 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     setLoading(true)
     
     try {
-      // Fetch closures
-      const timestamp = new Date().getTime()
-      const closuresResponse = await fetch(`/api/closures?t=${timestamp}&r=${Math.random()}`, {
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
-        },
-        cache: 'no-store'
-      })
+        // Fetch closures
+        const timestamp = new Date().getTime()
+        const random = Math.random().toString(36).substring(7)
+        const browserRandom = Math.floor(Math.random() * 1000000)
+        const closuresResponse = await fetch(`/api/closures?t=${timestamp}&r=${random}&br=${browserRandom}&nocache=${Date.now()}&v=${Math.random()}`, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Last-Modified': new Date(0).toUTCString(),
+            'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
+            'If-None-Match': '*',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-Cache-Buster': timestamp.toString()
+          },
+          cache: 'no-store'
+        })
       
       if (closuresResponse.ok) {
         const closuresData = await closuresResponse.json()

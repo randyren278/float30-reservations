@@ -50,18 +50,23 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
       // Add multiple cache-busting parameters
       const timestamp = new Date().getTime()
       const random = Math.random().toString(36).substring(7)
-      const url = `/api/closures?t=${timestamp}&r=${random}&force=true&nocache=1`
+      const browserRandom = Math.floor(Math.random() * 1000000)
+      const url = `/api/closures?t=${timestamp}&r=${random}&br=${browserRandom}&force=true&nocache=${Date.now()}&v=${Math.random()}&admin=1`
       
       console.log('Fetching from URL:', url)
       
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate',
+          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
           'Pragma': 'no-cache',
           'Expires': '0',
+          'Last-Modified': new Date(0).toUTCString(),
           'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
-          'If-None-Match': '*'
+          'If-None-Match': '*',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-Cache-Buster': timestamp.toString(),
+          'Accept': 'application/json, */*'
         },
         cache: 'no-store'
       })
@@ -109,10 +114,22 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   // Fetch reservations directly from API
   const fetchReservations = useCallback(async () => {
     try {
-      const response = await fetch('/api/admin/reservations', {
+      const timestamp = new Date().getTime()
+      const random = Math.random().toString(36).substring(7)
+      const browserRandom = Math.floor(Math.random() * 1000000)
+      const url = `/api/admin/reservations?t=${timestamp}&r=${random}&br=${browserRandom}&nocache=${Date.now()}&v=${Math.random()}`
+      
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`,
-          'Cache-Control': 'no-cache'
+          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'Last-Modified': new Date(0).toUTCString(),
+          'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
+          'If-None-Match': '*',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-Cache-Buster': timestamp.toString()
         },
         cache: 'no-store'
       })
@@ -131,9 +148,21 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   // Fetch slot duration from global settings
   const fetchSlotDuration = useCallback(async () => {
     try {
-      const response = await fetch('/api/table-config', {
+      const timestamp = new Date().getTime()
+      const random = Math.random().toString(36).substring(7)
+      const browserRandom = Math.floor(Math.random() * 1000000)
+      const url = `/api/table-config?t=${timestamp}&r=${random}&br=${browserRandom}&nocache=${Date.now()}&v=${Math.random()}&admin=1`
+      
+      const response = await fetch(url, {
         headers: {
-          'Cache-Control': 'no-cache'
+          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'Last-Modified': new Date(0).toUTCString(),
+          'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
+          'If-None-Match': '*',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-Cache-Buster': timestamp.toString()
         },
         cache: 'no-store'
       })
