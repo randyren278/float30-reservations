@@ -30,6 +30,7 @@ export default function AddReservation({ onSuccess, onCancel }: AddReservationPr
   const [closures, setClosures] = useState<Closure[]>([])
   const [tableConfigs, setTableConfigs] = useState<any[]>([])
   const [maxPartySize, setMaxPartySize] = useState(20)
+  const [slotDuration, setSlotDuration] = useState(30)
 
   const {
     register,
@@ -78,6 +79,7 @@ export default function AddReservation({ onSuccess, onCancel }: AddReservationPr
           const configData = await configResponse.json()
           setTableConfigs(configData.table_configs?.filter((c: any) => c.is_active) || [])
           setMaxPartySize(configData.global_settings?.max_party_size || 20)
+          setSlotDuration(configData.global_settings?.slot_duration || 30)
           
           // Set default party size to the smallest available if current default isn't available
           const availablePartySizes = configData.table_configs
@@ -184,7 +186,7 @@ export default function AddReservation({ onSuccess, onCancel }: AddReservationPr
     
     const slots = []
     for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) {
+      for (let minute = 0; minute < 60; minute += slotDuration) {
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
         
         if (!isTimeSlotBlocked(selectedDate, timeString)) {

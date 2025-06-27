@@ -37,6 +37,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
   const [timeSlots, setTimeSlots] = useState<string[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [closures, setClosures] = useState<RestaurantClosure[]>([])
+  const [slotDuration, setSlotDuration] = useState(30)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -127,6 +128,26 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     }
   }, [])
 
+  // Fetch slot duration from global settings
+  const fetchSlotDuration = useCallback(async () => {
+    try {
+      const response = await fetch('/api/table-config', {
+        headers: {
+          'Cache-Control': 'no-cache'
+        },
+        cache: 'no-store'
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setSlotDuration(data.global_settings?.slot_duration || 30)
+        console.log('📏 AdminCalendar slot duration updated:', data.global_settings?.slot_duration || 30)
+      }
+    } catch (error) {
+      console.error('Error fetching slot duration:', error)
+    }
+  }, [])
+
   // Fetch data on component mount with auto-refresh
   useEffect(() => {
     console.log('🚀 AdminCalendar mounted, initializing data fetch...')
@@ -136,7 +157,8 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
       try {
         await Promise.all([
           fetchReservations(),
-          forceRefreshClosures()
+          forceRefreshClosures(),
+          fetchSlotDuration()
         ])
       } finally {
         setLoading(false)
@@ -157,7 +179,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
       console.log('🧹 Cleaning up AdminCalendar intervals')
       clearInterval(refreshInterval)
     }
-  }, [fetchReservations, forceRefreshClosures])
+  }, [fetchReservations, forceRefreshClosures, fetchSlotDuration])
 
   // Listen for custom refresh events from other components
   useEffect(() => {
@@ -170,13 +192,22 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     window.addEventListener('closureUpdated', handleClosureUpdate)
     window.addEventListener('closureDeleted', handleClosureUpdate)
     window.addEventListener('closureCreated', handleClosureUpdate)
+    
+    // Listen for table config updates (which might change slot duration)
+    const handleTableConfigUpdate = () => {
+      console.log('📡 AdminCalendar: Received table config update event, refreshing slot duration...')
+      fetchSlotDuration()
+    }
+    
+    window.addEventListener('tableConfigUpdated', handleTableConfigUpdate)
 
     return () => {
       window.removeEventListener('closureUpdated', handleClosureUpdate)
       window.removeEventListener('closureDeleted', handleClosureUpdate) 
       window.removeEventListener('closureCreated', handleClosureUpdate)
+      window.removeEventListener('tableConfigUpdated', handleTableConfigUpdate)
     }
-  }, [forceRefreshClosures])
+  }, [forceRefreshClosures, fetchSlotDuration])
 
   // Generate time slots based on day of week
   const getTimeSlotsForDay = (dayOfWeek: number) => {
@@ -206,7 +237,7 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     
     const slots = []
     for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) {
+      for (let minute = 0; minute < 60; minute += slotDuration) {
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
         slots.push(timeString)
       }
@@ -222,14 +253,14 @@ export default function AdminCalendar({ onReservationClick, onStatusUpdate }: Ad
     const endHour = 21   // 9 PM
     
     for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) {
+      for (let minute = 0; minute < 60; minute += slotDuration) {
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
         slots.push(timeString)
       }
     }
     
     setTimeSlots(slots)
-  }, [])
+  }, [slotDuration])
 
   // Get the week range
   const weekStart = startOfWeek(currentWeek, { weekStartsOn: 1 }) // Monday start

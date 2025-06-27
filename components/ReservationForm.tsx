@@ -37,6 +37,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
   const [closures, setClosures] = useState<Closure[]>([])
   const [tableConfigs, setTableConfigs] = useState<TableConfiguration[]>([])
   const [maxPartySize, setMaxPartySize] = useState(10)
+  const [slotDuration, setSlotDuration] = useState(30)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -88,6 +89,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
         const activeConfigs = configData.table_configs?.filter((c: TableConfiguration) => c.is_active) || []
         setTableConfigs(activeConfigs)
         setMaxPartySize(configData.global_settings?.max_party_size || 10)
+        setSlotDuration(configData.global_settings?.slot_duration || 30)
         
         console.log(`✅ Updated table configs: ${activeConfigs.length} active configurations`)
         
@@ -274,7 +276,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     
     const slots = []
     for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) {
+      for (let minute = 0; minute < 60; minute += slotDuration) {
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
         
         // Check if this time slot is blocked by a partial closure
