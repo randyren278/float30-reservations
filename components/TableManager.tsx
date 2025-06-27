@@ -1,17 +1,17 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Users, Settings, Save, RotateCcw, Plus, Minus, X } from 'lucide-react'
+import { Users, Settings, Save, RotateCcw, Plus, Minus, X, AlertCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 interface TableConfiguration {
-  id: string
+  id?: string
   party_size: number
   table_count: number
   max_reservations_per_slot: number
   is_active: boolean
-  created_at: string
-  updated_at: string
+  created_at?: string
+  updated_at?: string
 }
 
 interface GlobalSettings {
@@ -34,26 +34,31 @@ interface AddTableSizeModalProps {
 }
 
 function AddTableSizeModal({ isOpen, onClose, onAdd, existingPartySizes, maxPartySize }: AddTableSizeModalProps) {
-  const [selectedPartySize, setSelectedPartySize] = useState<number>(1)
-
-  if (!isOpen) return null
-
-  // Generate available party sizes (not already configured)
-  const availablePartySizes = Array.from({ length: maxPartySize }, (_, i) => i + 1)
-    .filter(size => !existingPartySizes.includes(size))
-
-  const handleAdd = () => {
-    if (selectedPartySize && !existingPartySizes.includes(selectedPartySize)) {
-      onAdd(selectedPartySize)
-      onClose()
-      setSelectedPartySize(1)
-    }
-  }
+    const [selectedPartySize, setSelectedPartySize] = useState<number>(1);
+  
+    // Generate available party sizes (not already configured)
+    const availablePartySizes = Array.from({ length: maxPartySize }, (_, i) => i + 1)
+      .filter(size => !existingPartySizes.includes(size));
+  
+    const handleAdd = () => {
+      if (selectedPartySize && !existingPartySizes.includes(selectedPartySize)) {
+        onAdd(selectedPartySize);
+        onClose();
+        setSelectedPartySize(availablePartySizes[0] || 1);
+      }
+    };
+  
+    useEffect(() => {
+      if (isOpen && availablePartySizes.length > 0) {
+        setSelectedPartySize(availablePartySizes[0]);
+      }
+    }, [isOpen, availablePartySizes]);
+  
+    if (!isOpen) return null; // Move the early return after hooks
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-        {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">Add Table Configuration</h3>
           <button
@@ -64,7 +69,6 @@ function AddTableSizeModal({ isOpen, onClose, onAdd, existingPartySizes, maxPart
           </button>
         </div>
 
-        {/* Content */}
         <div className="p-6">
           {availablePartySizes.length === 0 ? (
             <div className="text-center py-4">
@@ -106,7 +110,6 @@ function AddTableSizeModal({ isOpen, onClose, onAdd, existingPartySizes, maxPart
           )}
         </div>
 
-        {/* Actions */}
         <div className="p-6 border-t border-gray-200 bg-gray-50">
           <div className="flex space-x-3">
             {availablePartySizes.length > 0 && (
@@ -132,7 +135,13 @@ function AddTableSizeModal({ isOpen, onClose, onAdd, existingPartySizes, maxPart
 
 export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
   const [tableConfigs, setTableConfigs] = useState<TableConfiguration[]>([])
+  const [originalTableConfigs, setOriginalTableConfigs] = useState<TableConfiguration[]>([])
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings>({
+    max_party_size: 10,
+    slot_duration: 30,
+    advance_booking_days: 30
+  })
+  const [originalGlobalSettings, setOriginalGlobalSettings] = useState<GlobalSettings>({
     max_party_size: 10,
     slot_duration: 30,
     advance_booking_days: 30
@@ -140,24 +149,41 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+
+  // Check if there are unsaved changes
+  useEffect(() => {
+    const configsChanged = JSON.stringify(tableConfigs) !== JSON.stringify(originalTableConfigs)
+    const settingsChanged = JSON.stringify(globalSettings) !== JSON.stringify(originalGlobalSettings)
+    setHasUnsavedChanges(configsChanged || settingsChanged)
+  }, [tableConfigs, globalSettings, originalTableConfigs, originalGlobalSettings])
 
   // Fetch current table configurations
   const fetchTableConfigs = async () => {
     setLoading(true)
     try {
+      console.log('🔄 Fetching table configurations...')
+      
       const response = await fetch('/api/admin/table-config', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('admin_password') || ''}`,
-          'Cache-Control': 'no-cache'
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
         },
         cache: 'no-store'
       })
       
       if (response.ok) {
         const data = await response.json()
-        setTableConfigs(data.table_configs || [])
-        setGlobalSettings(data.global_settings || globalSettings)
-        console.log('✅ Table configurations loaded:', data.table_configs?.length || 0)
+        const configs = data.table_configs || []
+        const settings = data.global_settings || globalSettings
+        
+        setTableConfigs(configs)
+        setOriginalTableConfigs(JSON.parse(JSON.stringify(configs))) // Deep copy
+        setGlobalSettings(settings)
+        setOriginalGlobalSettings(JSON.parse(JSON.stringify(settings))) // Deep copy
+        
+        console.log('✅ Table configurations loaded:', configs.length)
       } else {
         console.error('❌ Failed to fetch table configs:', response.status)
         toast.error('Failed to load table configurations')
@@ -186,17 +212,15 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
   // Add new table size via modal
   const handleAddTableSize = (partySize: number) => {
     const newConfig: TableConfiguration = {
-      id: `temp-${Date.now()}`,
       party_size: partySize,
       table_count: 1,
       max_reservations_per_slot: 1,
-      is_active: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      is_active: true
     }
     
     setTableConfigs(prev => [...prev, newConfig].sort((a, b) => a.party_size - b.party_size))
     toast.success(`Added table configuration for ${partySize} ${partySize === 1 ? 'person' : 'people'}`)
+    console.log('➕ Added new table configuration:', newConfig)
   }
 
   // Remove table size
@@ -209,13 +233,36 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
     if (confirm(`Remove table configuration for ${partySize} ${partySize === 1 ? 'person' : 'people'}? This will prevent customers from booking tables for this party size.`)) {
       setTableConfigs(prev => prev.filter(config => config.party_size !== partySize))
       toast.success(`Removed table configuration for ${partySize} ${partySize === 1 ? 'person' : 'people'}`)
+      console.log('➖ Removed table configuration for party size:', partySize)
     }
   }
 
   // Save all configurations
   const saveConfigurations = async () => {
+    if (tableConfigs.length === 0) {
+      toast.error('Must have at least one table configuration')
+      return
+    }
+
+    // Validate configurations
+    const invalidConfigs = tableConfigs.filter(config => 
+      config.table_count < 0 || 
+      config.max_reservations_per_slot < 0 ||
+      config.max_reservations_per_slot > config.table_count
+    )
+
+    if (invalidConfigs.length > 0) {
+      toast.error('Please fix invalid configurations before saving')
+      return
+    }
+
     setSaving(true)
     try {
+      console.log('💾 Saving table configurations...', {
+        configCount: tableConfigs.length,
+        globalSettings
+      })
+      
       const response = await fetch('/api/admin/table-config', {
         method: 'POST',
         headers: {
@@ -230,15 +277,23 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
 
       if (response.ok) {
         const result = await response.json()
-        console.log('✅ Table configurations saved successfully')
+        console.log('✅ Table configurations saved successfully:', result)
         toast.success('Table configurations saved successfully')
         
-        // Refresh data to get server IDs
+        // Refresh data to get server state and reset change tracking
         await fetchTableConfigs()
         
+        // Trigger global refresh to update other components
         if (onSettingsUpdate) {
+          console.log('📡 Triggering settings update callback')
           onSettingsUpdate()
         }
+
+        // Broadcast event to other components
+        window.dispatchEvent(new CustomEvent('tableConfigUpdated', {
+          detail: { configurations: tableConfigs, settings: globalSettings }
+        }))
+        
       } else {
         const errorData = await response.json()
         console.error('❌ Failed to save configurations:', errorData)
@@ -252,15 +307,24 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
     }
   }
 
+  // Reset to original state
+  const resetToOriginal = () => {
+    if (confirm('Discard all unsaved changes and reset to last saved state?')) {
+      setTableConfigs(JSON.parse(JSON.stringify(originalTableConfigs)))
+      setGlobalSettings(JSON.parse(JSON.stringify(originalGlobalSettings)))
+      toast('Reset to last saved state')
+    }
+  }
+
   // Reset to defaults
   const resetToDefaults = () => {
     if (confirm('Reset all table configurations to defaults? This will lose all current settings.')) {
       const defaultConfigs: TableConfiguration[] = [
-        { id: 'temp-1', party_size: 1, table_count: 2, max_reservations_per_slot: 2, is_active: true, created_at: '', updated_at: '' },
-        { id: 'temp-2', party_size: 2, table_count: 6, max_reservations_per_slot: 3, is_active: true, created_at: '', updated_at: '' },
-        { id: 'temp-3', party_size: 4, table_count: 4, max_reservations_per_slot: 2, is_active: true, created_at: '', updated_at: '' },
-        { id: 'temp-4', party_size: 6, table_count: 2, max_reservations_per_slot: 1, is_active: true, created_at: '', updated_at: '' },
-        { id: 'temp-5', party_size: 8, table_count: 1, max_reservations_per_slot: 1, is_active: true, created_at: '', updated_at: '' }
+        { party_size: 1, table_count: 2, max_reservations_per_slot: 2, is_active: true },
+        { party_size: 2, table_count: 6, max_reservations_per_slot: 3, is_active: true },
+        { party_size: 4, table_count: 4, max_reservations_per_slot: 2, is_active: true },
+        { party_size: 6, table_count: 2, max_reservations_per_slot: 1, is_active: true },
+        { party_size: 8, table_count: 1, max_reservations_per_slot: 1, is_active: true }
       ]
       
       setTableConfigs(defaultConfigs)
@@ -269,6 +333,7 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
         slot_duration: 30,
         advance_booking_days: 30
       })
+      toast('Reset to default configurations')
     }
   }
 
@@ -293,6 +358,18 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
         maxPartySize={globalSettings.max_party_size}
       />
 
+      {/* Unsaved Changes Warning */}
+      {hasUnsavedChanges && (
+        <div className="p-4 bg-yellow-50 border-b border-yellow-200">
+          <div className="flex items-center">
+            <AlertCircle className="w-5 h-5 text-yellow-600 mr-2" />
+            <div className="text-yellow-800">
+              <strong>You have unsaved changes.</strong> Remember to save your configurations to apply them to the reservation system.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="p-6 border-b border-gray-200">
         <div className="flex items-center justify-between">
@@ -305,21 +382,31 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
           </div>
           
           <div className="flex space-x-2">
+            {hasUnsavedChanges && (
+              <button
+                onClick={resetToOriginal}
+                className="flex items-center px-3 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                <RotateCcw className="w-4 h-4 mr-2" />
+                Reset
+              </button>
+            )}
+            
             <button
               onClick={resetToDefaults}
               className="flex items-center px-3 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
             >
               <RotateCcw className="w-4 h-4 mr-2" />
-              Reset
+              Defaults
             </button>
             
             <button
               onClick={saveConfigurations}
-              disabled={saving}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              disabled={saving || !hasUnsavedChanges}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Save className="w-4 h-4 mr-2" />
-              {saving ? 'Saving...' : 'Save Changes'}
+              {saving ? 'Saving...' : hasUnsavedChanges ? 'Save Changes' : 'Saved'}
             </button>
           </div>
         </div>
@@ -402,7 +489,7 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
 
         <div className="space-y-4">
           {tableConfigs.sort((a, b) => a.party_size - b.party_size).map((config) => (
-            <div key={`${config.party_size}-${config.id}`} className="border border-gray-200 rounded-lg p-4">
+            <div key={config.party_size} className="border border-gray-200 rounded-lg p-4">
               <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
                 {/* Party Size */}
                 <div>
@@ -428,7 +515,6 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
                     value={config.table_count}
                     onChange={(e) => updateTableConfig(config.party_size, 'table_count', parseInt(e.target.value) || 0)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="No limit"
                   />
                   <p className="text-xs text-gray-500 mt-1">Physical tables available</p>
                 </div>
@@ -444,11 +530,18 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
                     max={config.table_count || undefined}
                     value={config.max_reservations_per_slot}
                     onChange={(e) => updateTableConfig(config.party_size, 'max_reservations_per_slot', parseInt(e.target.value) || 0)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className={`w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                      config.max_reservations_per_slot > config.table_count ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                    }`}
                   />
                   {config.table_count > 0 && (
                     <p className="text-xs text-gray-500 mt-1">
                       Recommended max: {config.table_count}
+                    </p>
+                  )}
+                  {config.max_reservations_per_slot > config.table_count && (
+                    <p className="text-xs text-red-600 mt-1">
+                      Cannot exceed table count
                     </p>
                   )}
                 </div>

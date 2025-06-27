@@ -59,6 +59,14 @@ export default function AdminDashboard() {
         detail: { timestamp: new Date().toISOString() }
       }))
       
+      // Also broadcast table config update to ensure reservation form refreshes
+      window.dispatchEvent(new CustomEvent('tableConfigUpdated', {
+        detail: { 
+          timestamp: new Date().toISOString(),
+          source: 'admin_dashboard_refresh'
+        }
+      }))
+      
       console.log('✅ Global refresh completed')
     } catch (error) {
       console.error('❌ Global refresh failed:', error)
@@ -189,6 +197,23 @@ export default function AdminDashboard() {
   const handleClosureUpdate = useCallback(async () => {
     console.log('🎯 Admin Dashboard: Closure update received, triggering global refresh')
     await triggerGlobalRefresh()
+  }, [triggerGlobalRefresh])
+
+  // Handle table configuration updates
+  const handleTableConfigUpdate = useCallback(async () => {
+    console.log('🎯 Admin Dashboard: Table config update received, triggering global refresh')
+    await triggerGlobalRefresh()
+    
+    // Additional notification for table config changes
+    toast.success('Table configurations updated successfully!')
+    
+    // Broadcast specific table config update event
+    window.dispatchEvent(new CustomEvent('tableConfigUpdated', {
+      detail: { 
+        timestamp: new Date().toISOString(),
+        source: 'admin_dashboard_table_update'
+      }
+    }))
   }, [triggerGlobalRefresh])
 
   const exportReservations = () => {
@@ -503,7 +528,7 @@ export default function AdminDashboard() {
           />
         ) : viewMode === 'tables' ? (
           <TableManager
-            onSettingsUpdate={triggerGlobalRefresh}
+            onSettingsUpdate={handleTableConfigUpdate}
           />
         ) : viewMode === 'add-reservation' ? (
           <AddReservation

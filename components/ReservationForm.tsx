@@ -1,11 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-import { useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format, addDays, parseISO } from 'date-fns'
-import { Calendar, Clock, Users, Mail, Phone, MessageSquare, CheckCircle } from 'lucide-react'
+import { Calendar, Clock, Users, Mail, Phone, MessageSquare, CheckCircle, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { reservationSchema, type ReservationFormData } from '@/lib/validation'
 import { formatPhoneNumber } from '@/lib/validation'
@@ -38,6 +37,8 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
   const [closures, setClosures] = useState<Closure[]>([])
   const [tableConfigs, setTableConfigs] = useState<TableConfiguration[]>([])
   const [maxPartySize, setMaxPartySize] = useState(10)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   const {
     register,
@@ -54,65 +55,130 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     }
   })
 
-  // Fetch table configurations and closures
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Fetch closures
-        const timestamp = new Date().getTime()
-        const closuresResponse = await fetch(`/api/closures?t=${timestamp}&r=${Math.random()}`, {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache'
-          },
-          cache: 'no-store'
-        })
+  // Force refresh function for table configurations
+  const forceRefreshTableConfigs = useCallback(async () => {
+    console.log('🔄 ReservationForm: Force refreshing table configurations...')
+    setRefreshing(true)
+    
+    try {
+      const timestamp = new Date().getTime()
+      const random = Math.random().toString(36).substring(7)
+      const url = `/api/table-config?t=${timestamp}&r=${random}&force=true`
+      
+      console.log('Fetching table configs from:', url)
+      
+      const configResponse = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT',
+          'If-None-Match': '*'
+        },
+        cache: 'no-store'
+      })
+      
+      console.log('Table config API response status:', configResponse.status)
+      
+      if (configResponse.ok) {
+        const configData = await configResponse.json()
+        console.log('Fresh table config data received:', configData)
         
-        if (closuresResponse.ok) {
-          const closuresData = await closuresResponse.json()
-          setClosures(closuresData.closures || [])
-        }
-
-        // Fetch table configurations (public endpoint)
-        const configResponse = await fetch('/api/table-config', {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-          },
-          cache: 'no-store'
-        })
+        const activeConfigs = configData.table_configs?.filter((c: TableConfiguration) => c.is_active) || []
+        setTableConfigs(activeConfigs)
+        setMaxPartySize(configData.global_settings?.max_party_size || 10)
         
-        if (configResponse.ok) {
-          const configData = await configResponse.json()
-          setTableConfigs(configData.table_configs?.filter((c: TableConfiguration) => c.is_active) || [])
-          setMaxPartySize(configData.global_settings?.max_party_size || 10)
-          
-          // Set default party size to the smallest available if current default isn't available
-          const availablePartySizes = configData.table_configs
-            ?.filter((c: TableConfiguration) => c.is_active)
-            ?.map((c: TableConfiguration) => c.party_size)
-            ?.sort((a: number, b: number) => a - b) || []
-          
-          if (availablePartySizes.length > 0 && !availablePartySizes.includes(2)) {
+        console.log(`✅ Updated table configs: ${activeConfigs.length} active configurations`)
+        
+        // Update default party size if needed
+        const availablePartySizes = activeConfigs
+          .map((c: TableConfiguration) => c.party_size)
+          .sort((a: number, b: number) => a - b)
+        
+        if (availablePartySizes.length > 0) {
+          const currentPartySize = watch('party_size')
+          if (!availablePartySizes.includes(currentPartySize)) {
             setValue('party_size', availablePartySizes[0])
+            console.log(`Updated default party size to ${availablePartySizes[0]}`)
           }
         }
-      } catch (error) {
-        console.error('Error fetching data:', error)
+        
+      } else {
+        console.error('Failed to fetch table configs:', configResponse.status)
       }
+    } catch (error) {
+      console.error('❌ Error refreshing table configs:', error)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [setValue, watch])
+
+  // Fetch table configurations and closures
+  const fetchData = useCallback(async () => {
+    console.log('🚀 ReservationForm: Fetching initial data...')
+    setLoading(true)
+    
+    try {
+      // Fetch closures
+      const timestamp = new Date().getTime()
+      const closuresResponse = await fetch(`/api/closures?t=${timestamp}&r=${Math.random()}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        },
+        cache: 'no-store'
+      })
+      
+      if (closuresResponse.ok) {
+        const closuresData = await closuresResponse.json()
+        setClosures(closuresData.closures || [])
+        console.log(`📅 Loaded ${closuresData.closures?.length || 0} closures`)
+      }
+
+      // Fetch table configurations
+      await forceRefreshTableConfigs()
+      
+    } catch (error) {
+      console.error('❌ Error fetching data:', error)
+      toast.error('Error loading configuration data')
+    } finally {
+      setLoading(false)
+    }
+  }, [forceRefreshTableConfigs])
+
+  // Initial data fetch
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  // Listen for table configuration updates from admin
+  useEffect(() => {
+    const handleTableConfigUpdate = (event: CustomEvent) => {
+      console.log('📡 ReservationForm: Received table config update event')
+      forceRefreshTableConfigs()
     }
 
-    fetchData()
-  }, [setValue])
+    // Listen for custom events
+    window.addEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
+
+    return () => {
+      window.removeEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
+    }
+  }, [forceRefreshTableConfigs])
 
   const selectedDate = watch('reservation_date')
   const selectedTime = watch('reservation_time')
 
   // Get available party sizes from table configurations
   const getAvailablePartySizes = () => {
-    return tableConfigs
+    const sizes = tableConfigs
       .filter(config => config.is_active)
       .map(config => config.party_size)
       .sort((a, b) => a - b)
+    
+    console.log('Available party sizes:', sizes)
+    return sizes
   }
 
   // Generate available dates (only exclude full-day closures)
@@ -338,11 +404,29 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
 
   const availablePartySizes = getAvailablePartySizes()
 
+  if (loading) {
+    return (
+      <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+        <div className="text-center">
+          <RefreshCw className="w-8 h-8 text-blue-600 mx-auto mb-4 animate-spin" />
+          <div className="text-gray-600">Loading reservation system...</div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
       <div className="text-center mb-6">
         <h2 className="text-2xl font-bold text-gray-900 mb-2">Make a Reservation</h2>
         <p className="text-gray-600">Float 30 Restaurant</p>
+        
+        {refreshing && (
+          <div className="mt-2 flex items-center justify-center text-blue-600">
+            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+            <span className="text-sm">Updating configurations...</span>
+          </div>
+        )}
       </div>
 
       {/* Debug info for development */}
@@ -354,6 +438,9 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
               <strong>Available party sizes:</strong> {availablePartySizes.join(', ')}
             </div>
           )}
+          <div className="mt-1">
+            <strong>Max party size:</strong> {maxPartySize}
+          </div>
         </div>
       )}
 
@@ -363,6 +450,12 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           <div className="text-red-800 text-sm">
             <strong>⚠️ No tables currently available for booking.</strong>
             <p className="mt-1">Please contact the restaurant directly to make a reservation.</p>
+            <button
+              onClick={() => forceRefreshTableConfigs()}
+              className="mt-2 text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded transition-colors"
+            >
+              Refresh Configuration
+            </button>
           </div>
         </div>
       )}
@@ -552,6 +645,18 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
             <li>• For larger parties or special arrangements, please call us directly</li>
             <li>• Confirmation email will be sent immediately</li>
           </ul>
+        </div>
+
+        {/* Manual Refresh Button */}
+        <div className="text-center">
+          <button
+            type="button"
+            onClick={() => fetchData()}
+            disabled={loading || refreshing}
+            className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+          >
+            {loading || refreshing ? 'Refreshing...' : 'Refresh Configuration'}
+          </button>
         </div>
       </form>
     </div>

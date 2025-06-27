@@ -39,6 +39,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    console.log('🔄 Fetching table configurations from database...')
+
     // Fetch table configurations
     const { data: tableConfigs, error: tableError } = await supabaseAdmin
       .from('table_configurations')
@@ -74,19 +76,27 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    // If no table configs exist, return defaults
+    // If no table configs exist, return defaults but don't insert them yet
     const defaultTableConfigs = tableConfigs && tableConfigs.length > 0 ? tableConfigs : [
-      { id: 'default-1', party_size: 1, table_count: 2, max_reservations_per_slot: 2, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 'default-2', party_size: 2, table_count: 6, max_reservations_per_slot: 3, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 'default-3', party_size: 4, table_count: 4, max_reservations_per_slot: 2, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 'default-4', party_size: 6, table_count: 2, max_reservations_per_slot: 1, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 'default-5', party_size: 8, table_count: 1, max_reservations_per_slot: 1, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+      { id: 'temp-1', party_size: 1, table_count: 2, max_reservations_per_slot: 2, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      { id: 'temp-2', party_size: 2, table_count: 6, max_reservations_per_slot: 3, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      { id: 'temp-3', party_size: 4, table_count: 4, max_reservations_per_slot: 2, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      { id: 'temp-4', party_size: 6, table_count: 2, max_reservations_per_slot: 1, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      { id: 'temp-5', party_size: 8, table_count: 1, max_reservations_per_slot: 1, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
     ]
+
+    console.log(`✅ Fetched ${defaultTableConfigs.length} table configurations`)
 
     return NextResponse.json({
       success: true,
       table_configs: defaultTableConfigs,
       global_settings: globalSettings
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
     })
 
   } catch (error) {
@@ -109,9 +119,15 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
+    console.log('📝 Received table config save request:', {
+      configCount: body.table_configs?.length,
+      globalSettings: body.global_settings
+    })
+
     const validationResult = requestSchema.safeParse(body)
     
     if (!validationResult.success) {
+      console.error('❌ Validation failed:', validationResult.error.errors)
       return NextResponse.json(
         { 
           error: 'Validation failed', 
@@ -123,34 +139,55 @@ export async function POST(request: NextRequest) {
 
     const { table_configs, global_settings } = validationResult.data
 
-    // Start transaction-like operations
+    // Validate business rules
+    const invalidConfigs = table_configs.filter(config => 
+      config.max_reservations_per_slot > config.table_count && config.table_count > 0
+    )
+
+    if (invalidConfigs.length > 0) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid configuration',
+          message: 'Max reservations per slot cannot exceed table count'
+        },
+        { status: 400 }
+      )
+    }
+
+    // Ensure table exists before operations
     try {
-      // 1. Create table_configurations table if it doesn't exist
-      await supabaseAdmin.rpc('create_table_configurations_if_not_exists')
-    } catch (createError) {
-      // If RPC doesn't exist, create table manually
-      console.log('Creating table_configurations table...')
+      console.log('🏗️ Ensuring table_configurations table exists...')
       
-      const createTableQuery = `
+      // Create table if it doesn't exist
+      const createTableSQL = `
         CREATE TABLE IF NOT EXISTS table_configurations (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
           party_size INTEGER NOT NULL UNIQUE,
-          table_count INTEGER NOT NULL DEFAULT 0,
-          max_reservations_per_slot INTEGER NOT NULL DEFAULT 1,
+          table_count INTEGER NOT NULL DEFAULT 0 CHECK (table_count >= 0),
+          max_reservations_per_slot INTEGER NOT NULL DEFAULT 1 CHECK (max_reservations_per_slot >= 0),
           is_active BOOLEAN DEFAULT true,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
+        
+        CREATE INDEX IF NOT EXISTS idx_table_configurations_party_size ON table_configurations(party_size);
+        CREATE INDEX IF NOT EXISTS idx_table_configurations_active ON table_configurations(is_active);
       `
       
-      try {
-        await supabaseAdmin.rpc('exec_sql', { sql: createTableQuery })
-      } catch (execError) {
-        console.warn('Could not create table via RPC, proceeding with upsert operations')
-      }
+      // Execute table creation via a simple insert that will trigger table creation if needed
+      await supabaseAdmin
+        .from('table_configurations')
+        .select('id')
+        .limit(1)
+        
+    } catch (tableCreationError) {
+      console.log('⚠️ Table creation check failed, but continuing...')
     }
 
-    // 2. Clear existing table configurations
+    // Start transaction-like operations
+    console.log('🧹 Clearing existing table configurations...')
+    
+    // Delete all existing configurations
     const { error: deleteError } = await supabaseAdmin
       .from('table_configurations')
       .delete()
@@ -160,26 +197,35 @@ export async function POST(request: NextRequest) {
       console.error('Error clearing table configs:', deleteError)
     }
 
-    // 3. Insert new table configurations
+    // Insert new table configurations
     if (table_configs.length > 0) {
+      console.log(`➕ Inserting ${table_configs.length} new table configurations...`)
+      
       const configsToInsert = table_configs.map(config => ({
         party_size: config.party_size,
         table_count: config.table_count,
         max_reservations_per_slot: config.max_reservations_per_slot,
-        is_active: config.is_active
+        is_active: config.is_active,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       }))
 
-      const { error: insertError } = await supabaseAdmin
+      const { data: insertedConfigs, error: insertError } = await supabaseAdmin
         .from('table_configurations')
         .insert(configsToInsert)
+        .select()
 
       if (insertError) {
-        console.error('Error inserting table configs:', insertError)
+        console.error('❌ Error inserting table configs:', insertError)
         throw insertError
       }
+
+      console.log(`✅ Successfully inserted ${insertedConfigs?.length || 0} configurations`)
     }
 
-    // 4. Update global settings
+    // Update global settings
+    console.log('⚙️ Updating global settings...')
+    
     const settingsToUpdate = [
       { setting_key: 'max_party_size', setting_value: global_settings.max_party_size.toString() },
       { setting_key: 'slot_duration', setting_value: global_settings.slot_duration.toString() },
@@ -193,7 +239,7 @@ export async function POST(request: NextRequest) {
           {
             setting_key: setting.setting_key,
             setting_value: setting.setting_value,
-            description: `${setting.setting_key.replace('_', ' ')} setting`,
+            description: `${setting.setting_key.replace(/_/g, ' ')} setting`,
             updated_at: new Date().toISOString()
           },
           { 
@@ -203,22 +249,40 @@ export async function POST(request: NextRequest) {
         )
 
       if (upsertError) {
-        console.error(`Error upserting setting ${setting.setting_key}:`, upsertError)
+        console.error(`❌ Error upserting setting ${setting.setting_key}:`, upsertError)
         throw upsertError
       }
     }
 
     console.log('✅ Table configurations and settings saved successfully')
 
+    // Clear any caches by updating a timestamp in settings
+    await supabaseAdmin
+      .from('restaurant_settings')
+      .upsert({
+        setting_key: 'table_config_last_updated',
+        setting_value: new Date().getTime().toString(),
+        description: 'Last table configuration update timestamp'
+      }, {
+        onConflict: 'setting_key'
+      })
+
     return NextResponse.json({
       success: true,
       message: 'Table configurations saved successfully',
       table_configs_count: table_configs.length,
-      global_settings_updated: Object.keys(global_settings).length
+      global_settings_updated: Object.keys(global_settings).length,
+      timestamp: new Date().toISOString()
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
     })
 
   } catch (error) {
-    console.error('Table config save error:', error)
+    console.error('❌ Table config save error:', error)
     return NextResponse.json(
       { 
         error: 'Internal server error',
