@@ -289,9 +289,23 @@ export default function TableManager({ onSettingsUpdate }: TableManagerProps) {
           onSettingsUpdate()
         }
 
-        // Broadcast event to other components
+        // Broadcast event to other components with more specific data
+        console.log('📡 Broadcasting tableConfigUpdated event with new settings:', globalSettings)
         window.dispatchEvent(new CustomEvent('tableConfigUpdated', {
-          detail: { configurations: tableConfigs, settings: globalSettings }
+          detail: { 
+            configurations: tableConfigs, 
+            settings: globalSettings,
+            timestamp: Date.now(),
+            slotDuration: globalSettings.slot_duration
+          }
+        }))
+        
+        // Also broadcast a specific slot duration change event
+        window.dispatchEvent(new CustomEvent('slotDurationChanged', {
+          detail: { 
+            newDuration: globalSettings.slot_duration,
+            timestamp: Date.now()
+          }
         }))
         
       } else {

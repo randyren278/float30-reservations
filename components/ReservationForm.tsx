@@ -38,6 +38,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
   const [tableConfigs, setTableConfigs] = useState<TableConfiguration[]>([])
   const [maxPartySize, setMaxPartySize] = useState(10)
   const [slotDuration, setSlotDuration] = useState(30)
+  const [availableTimeSlots, setAvailableTimeSlots] = useState<{value: string, label: string}[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -170,15 +171,30 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
   // Listen for table configuration updates from admin
   useEffect(() => {
     const handleTableConfigUpdate = (event: CustomEvent) => {
-      console.log('📡 ReservationForm: Received table config update event')
+      console.log('📡 ReservationForm: Received table config update event:', event.detail)
       forceRefreshTableConfigs()
+      
+      // Immediately update slot duration if provided
+      if (event.detail && event.detail.slotDuration) {
+        console.log('🕒 ReservationForm: Updating slot duration to:', event.detail.slotDuration)
+        setSlotDuration(event.detail.slotDuration)
+      }
+    }
+
+    const handleSlotDurationChange = (event: CustomEvent) => {
+      console.log('🕒 ReservationForm: Received slot duration change event:', event.detail)
+      if (event.detail && event.detail.newDuration) {
+        setSlotDuration(event.detail.newDuration)
+      }
     }
 
     // Listen for custom events
     window.addEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
+    window.addEventListener('slotDurationChanged', handleSlotDurationChange as EventListener)
 
     return () => {
       window.removeEventListener('tableConfigUpdated', handleTableConfigUpdate as EventListener)
+      window.removeEventListener('slotDurationChanged', handleSlotDurationChange as EventListener)
     }
   }, [forceRefreshTableConfigs])
 
@@ -256,12 +272,12 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     return false
   }
 
-  // Generate available time slots based on day of week
-  const getAvailableTimeSlots = () => {
-    if (!selectedDate) return []
+  // Generate available time slots based on day of week - now using useCallback for proper memoization
+  const generateTimeSlots = useCallback((date: string, duration: number) => {
+    if (!date) return []
     
-    const date = parseISO(selectedDate)
-    const dayOfWeek = date.getDay() // 0 = Sunday, 1 = Monday, etc.
+    const parsedDate = parseISO(date)
+    const dayOfWeek = parsedDate.getDay() // 0 = Sunday, 1 = Monday, etc.
     
     let startHour, endHour
     
@@ -289,26 +305,55 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
     
     const slots = []
     for (let hour = startHour; hour < endHour; hour++) {
-      for (let minute = 0; minute < 60; minute += slotDuration) {
+      for (let minute = 0; minute < 60; minute += duration) {
         const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
         
         // Check if this time slot is blocked by a partial closure
-        if (!isTimeSlotBlocked(selectedDate, timeString)) {
+        const dayClosures = closures.filter(c => c.closure_date === date)
+        let isBlocked = false
+        
+        for (const closure of dayClosures) {
+          // Skip all-day closures (already handled in date filtering)
+          if (closure.all_day) continue
+          
+          // Check if time falls within partial closure
+          if (closure.start_time && closure.end_time) {
+            if (timeString >= closure.start_time && timeString <= closure.end_time) {
+              console.log('ReservationForm: Time slot blocked by partial closure:', { 
+                date, 
+                time: timeString, 
+                closure: closure.closure_name 
+              })
+              isBlocked = true
+              break
+            }
+          }
+        }
+        
+        if (!isBlocked) {
           const displayTime = format(parseISO(`2000-01-01T${timeString}`), 'h:mm a')
           
           slots.push({
             value: timeString,
             label: displayTime
           })
-        } else {
-          console.log(`ReservationForm: Skipping blocked time slot ${timeString}`)
         }
       }
     }
     
-    console.log(`ReservationForm: Generated ${slots.length} time slots for ${selectedDate}`)
+    console.log(`ReservationForm: Generated ${slots.length} time slots for ${date} with ${duration}min duration`)
     return slots
-  }
+  }, [closures])
+
+  // Update time slots whenever date or slot duration changes
+  useEffect(() => {
+    console.log('🕒 ReservationForm: Regenerating time slots due to date/duration change', {
+      selectedDate,
+      slotDuration
+    })
+    const newSlots = generateTimeSlots(selectedDate, slotDuration)
+    setAvailableTimeSlots(newSlots)
+  }, [selectedDate, slotDuration, generateTimeSlots])
 
   const onSubmit = async (data: ReservationFormData) => {
     setIsSubmitting(true)
@@ -516,7 +561,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
             className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
           >
             <option value="">Select a time</option>
-            {getAvailableTimeSlots().map((slot) => (
+            {availableTimeSlots.map((slot) => (
               <option key={slot.value} value={slot.value}>
                 {slot.label}
               </option>
@@ -528,7 +573,7 @@ export default function ReservationForm({ availableSlots, onSuccess }: Reservati
           {!selectedDate && (
             <p className="text-gray-500 text-sm mt-1">Please select a date first</p>
           )}
-          {selectedDate && getAvailableTimeSlots().length === 0 && (
+          {selectedDate && availableTimeSlots.length === 0 && (
             <p className="text-red-500 text-sm mt-1">
               No time slots available for this date. The restaurant may be closed.
             </p>
